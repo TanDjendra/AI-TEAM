@@ -1,0 +1,11 @@
+{
+  "id": "TASK-003",
+  "title": "Create a duration formatting module with tests",
+  "description": "In the workspace, create a small Node.js (ESM) package that exports `formatDuration(ms)` and `parseDuration(text)`.\n\nRequirements:\n- Language: JavaScript (Node ESM). Create package.json with \"type\": \"module\" and a `test` script.\n- Use the built-in test runner: `node --test`.\n- formatDuration(ms): returns a compact human string. Under 1000ms returns `${ms}ms`. Under 60s returns `${s}s`. Under 60m returns `${m}m ${s}s`. Otherwise `${h}h ${m}m`.\n- parseDuration(text): parses '90s', '2m 30s', '1h 5m' back into milliseconds. Throws a TypeError for input it cannot parse.\n- Files: package.json, src/index.js, test/index.test.js (or equivalent).\n- Write real tests covering: milliseconds, seconds, minutes+seconds, hours+minutes, the 59s/60s boundary, round-tripping parseDuration(formatDuration(ms)), and the TypeError case.\n- Run `npm test` (or `node --test`) and make sure every test passes before you report DONE.",
+  "acceptanceCriteria": [
+    "package.json exists with type=module and a test script that runs the tests",
+    "src/index.js exports formatDuration and parseDuration",
+    "test files exist and exercise the cases listed in the description",
+    "Running the test command exits with code 0"
+  ]
+}

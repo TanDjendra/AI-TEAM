@@ -1,0 +1,11 @@
+{
+  "id": "TASK-002",
+  "title": "Create a temperature conversion module with tests",
+  "description": "In the workspace, create a small Node.js (ESM) package that exports `celsiusToFahrenheit(value)` and `fahrenheitToCelsius(value)`.\n\nRequirements:\n- Language: JavaScript (Node ESM). Create package.json with \"type\": \"module\" and a `test` script.\n- Use the built-in test runner: `node --test`.\n- celsiusToFahrenheit(value): returns value * 9/5 + 32.\n- fahrenheitToCelsius(value): returns (value - 32) * 5/9.\n- Both must throw a TypeError when given a non-number or NaN.\n- Files: package.json, src/index.js, test/index.test.js (or equivalent).\n- Write real tests covering: freezing point (0C = 32F), boiling point (100C = 212F), the reverse conversions, negative values, and the TypeError cases.\n- Run `npm test` (or `node --test`) and make sure every test passes before you report DONE.",
+  "acceptanceCriteria": [
+    "package.json exists with type=module and a test script that runs the tests",
+    "src/index.js exports celsiusToFahrenheit and fahrenheitToCelsius",
+    "test files exist and exercise the cases listed in the description",
+    "Running the test command exits with code 0"
+  ]
+}

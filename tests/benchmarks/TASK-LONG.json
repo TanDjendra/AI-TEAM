@@ -1,0 +1,11 @@
+{
+  "id": "TASK-LONG",
+  "title": "Create a fully tested multi-file Markdown Parser and Generator",
+  "description": "In the workspace, create a Node.js ESM package that parses Markdown strings into an AST (Abstract Syntax Tree) and can generate HTML from the AST. It must support Headings (H1-H6), Bold, Italic, Links, and Paragraphs. Features:\n1. Parser module (`src/parser.js`) that takes markdown string and returns AST.\n2. Generator module (`src/generator.js`) that takes AST and returns HTML string.\n3. Main entry point (`src/index.js`) exposing `render(markdownString)`.\n4. CLI script (`bin/cli.js`) that reads a markdown file and outputs HTML to stdout.\nRequirements:\n- Node ESM format.\n- Use `node --test` for comprehensive unit tests of each AST node type.\n- Pass all tests.",
+  "acceptanceCriteria": [
+    "package.json is ESM and includes a bin property",
+    "parser.js and generator.js are implemented correctly",
+    "node --test passes completely with coverage of basic markdown elements"
+  ],
+  "workspaceSlug": "TASK-LONG"
+}

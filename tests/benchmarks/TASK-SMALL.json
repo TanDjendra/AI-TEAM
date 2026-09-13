@@ -1,0 +1,12 @@
+{
+  "id": "TASK-SMALL",
+  "title": "Create a string utility module with tests",
+  "description": "In the workspace, create a small Node.js (ESM) package that exports a function `slugify(input)` and a function `wordCount(input)`.\n\nRequirements:\n- Language: JavaScript (Node ESM). Create package.json with `\"type\": \"module\"` and a `test` script.\n- Use the built-in test runner: `node --test`.\n- slugify(input): lowercase, trim, replace any run of non-alphanumeric characters with a single hyphen, and strip leading/trailing hyphens. Empty or all-symbol input returns an empty string.\n- wordCount(input): number of whitespace-separated tokens in the trimmed input; empty input returns 0.\n- Files: package.json, src/index.js, test/index.test.js (or equivalent).\n- Write real tests covering: normal input, empty input, punctuation-only input, repeated separators, unicode letters.\n- Run `npm test` (or `node --test`) and make sure every test passes before you report DONE.",
+  "acceptanceCriteria": [
+    "package.json exists with type=module and a test script that runs the tests",
+    "src/index.js exports slugify and wordCount",
+    "test files exist and exercise the edge cases listed in the description",
+    "Running the test command exits with code 0"
+  ],
+  "workspaceSlug": "TASK-SMALL"
+}

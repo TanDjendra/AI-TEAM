@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+/*
+ * Command-center theming.
+ *
+ * Dark is the default (an ops console), light is a first-class variant via
+ * `prefers-color-scheme`. Colours are declared as CSS variables so both themes
+ * share one component layer; no component hard-codes a palette.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-surface: #ffffff;
+  --color-surface-raised: #f7f8fa;
+  --color-surface-sunken: #eef0f4;
+  --color-border-subtle: #e2e5ea;
+  --color-content: #14161a;
+  --color-content-muted: #5c636e;
+  --color-content-faint: #8a919c;
+
+  --color-coder: #2563eb;
+  --color-coder-soft: #dbeafe;
+  --color-reviewer: #7c3aed;
+  --color-reviewer-soft: #ede9fe;
+
+  --color-ok: #15803d;
+  --color-warn: #b45309;
+  --color-danger: #b91c1c;
+  --color-info: #0369a1;
+}
+
+:root {
+  --surface: #ffffff;
+  --surface-raised: #f7f8fa;
+  --surface-sunken: #eef0f4;
+  --border-subtle: #e2e5ea;
+  --content: #14161a;
+  --content-muted: #5c636e;
+  --content-faint: #8a919c;
+
+  --coder: #2563eb;
+  --coder-soft: #dbeafe;
+  --reviewer: #7c3aed;
+  --reviewer-soft: #ede9fe;
+
+  --ok: #15803d;
+  --ok-soft: #dcfce7;
+  --warn: #b45309;
+  --warn-soft: #fef3c7;
+  --danger: #b91c1c;
+  --danger-soft: #fee2e2;
+  --info: #0369a1;
+  --info-soft: #e0f2fe;
+  --neutral-soft: #eef0f4;
+}
+
+.dark {
+  --surface: #0d1017;
+  --surface-raised: #151a23;
+  --surface-sunken: #0a0d13;
+  --border-subtle: #232a36;
+  --content: #e8ebf0;
+  --content-muted: #9aa3b2;
+  --content-faint: #6b7484;
+
+  --coder: #60a5fa;
+  --coder-soft: #14263f;
+  --reviewer: #a78bfa;
+  --reviewer-soft: #241a3f;
+
+  --ok: #4ade80;
+  --ok-soft: #10261a;
+  --warn: #fbbf24;
+  --warn-soft: #2a1f08;
+  --danger: #f87171;
+  --danger-soft: #2b1214;
+  --info: #38bdf8;
+  --info-soft: #0b2233;
+  --neutral-soft: #1b212c;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--surface-sunken);
+  color: var(--content);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A single utility used across panels so borders/backgrounds stay consistent. */
+@utility panel {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.625rem;
+}

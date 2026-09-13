@@ -1,0 +1,12 @@
+{
+  "id": "TASK-MEDIUM",
+  "title": "Create an in-memory Key-Value store with TTL and REST API",
+  "description": "In the workspace, create a Node.js ESM package that implements an in-memory Key-Value store. Features: set(key, value, ttlMs), get(key) -> value or null, del(key). It should support a simple Express or HTTP server with endpoints: POST /set, GET /get?key=..., DELETE /del?key=...\nRequirements:\n- Language: JavaScript (Node ESM).\n- Use `node --test`.\n- Write tests for TTL expiry (use small timeouts or mocked timers).\n- Ensure the server can be started and stopped cleanly for tests.\n- Run tests and ensure they pass.",
+  "acceptanceCriteria": [
+    "package.json has type=module and a test script",
+    "KV store supports TTL expiry correctly",
+    "HTTP endpoints exist for get, set, del",
+    "Tests pass successfully"
+  ],
+  "workspaceSlug": "TASK-MEDIUM"
+}

@@ -1,0 +1,24 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.DS_Store
+
+# Next.js build output
+.next/
+next-env.d.ts
+out/
+
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Runtime artifacts
+.runs/
+workspace/
+.data/
+
+# Scratch/diagnostic scripts
+scratch/
