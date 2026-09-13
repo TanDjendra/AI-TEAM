@@ -151,15 +151,17 @@ export async function createPersistence(
   const driver: Driver | undefined =
     options.db !== undefined
       ? undefined
-      : (options.driver ??
-        (hasEmbedded
-          ? await options.pgliteLoader!(config.database.pgliteDir!)
-          : new PgDriver({
-              ...(config.database.url ? { connectionString: config.database.url } : {}),
+      : options.driver ??
+        (config.database.url
+          ? new PgDriver({
+              connectionString: config.database.url,
               max: config.database.maxConnections,
               ssl: config.database.ssl ? { rejectUnauthorized: false } : false,
               applicationName: "ai-team-orchestrator",
-            } satisfies PgDriverOptions)));
+            } satisfies PgDriverOptions)
+          : hasEmbedded
+          ? await options.pgliteLoader!(config.database.pgliteDir!)
+          : undefined);
 
   const db = options.db ?? createDb(driver!);
 
