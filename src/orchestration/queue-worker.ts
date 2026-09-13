@@ -83,6 +83,7 @@ export class QueueWorker {
               title: task.title,
               description: task.description,
               workspaceSlug: basename(task.workspace),
+              workspacePath: task.workspace,
             },
             reason: "queue_worker_claim",
           });

@@ -109,6 +109,8 @@ export interface ClaimOutcome {
 }
 
 export interface TaskRepository {
+  predictNextExternalId(): Promise<string>;
+  createAuto(input: Omit<CreateTaskInput, "externalId">): Promise<TaskRecord>;
   create(input: CreateTaskInput): Promise<TaskRecord>;
   findById(id: string): Promise<TaskRecord | undefined>;
   findByExternalId(externalId: string): Promise<TaskRecord | undefined>;
@@ -217,6 +219,47 @@ export class PostgresTaskRepository extends Repository implements TaskRepository
         );
         return mapTask(requireRow(rows, "task.create"));
       }),
+    );
+  }
+
+  async predictNextExternalId(): Promise<string> {
+    const rows = await this.tx().query(
+      `SELECT 'TASK-' || LPAD((COALESCE(MAX(NULLIF(regexp_replace(external_id, '^TASK-0*', ''), '')::integer), 0) + 1)::text, 3, '0') AS val
+       FROM tasks
+       WHERE external_id ~ '^TASK-\\d+$'`
+    );
+    return asString(rows[0]?.val ?? "TASK-001");
+  }
+
+  async createAuto(input: Omit<CreateTaskInput, "externalId">): Promise<TaskRecord> {
+    return withDbRetry(async () =>
+      this.run(async (tx) => {
+        // Use an advisory lock to serialize auto-ID allocation globally
+        await tx.query("SELECT pg_advisory_xact_lock(7456)");
+        const rows = await tx.query(
+          `
+          WITH next_id AS (
+            SELECT 'TASK-' || LPAD((COALESCE(MAX(NULLIF(regexp_replace(external_id, '^TASK-0*', ''), '')::integer), 0) + 1)::text, 3, '0') AS val
+            FROM tasks
+            WHERE external_id ~ '^TASK-\\d+$'
+          )
+          INSERT INTO tasks (external_id, title, description, workspace, max_review_cycles,
+                             status, assigned_agent_id, created_at)
+          SELECT next_id.val, $1, $2, $3, $4, 'PENDING', $5, coalesce($6::timestamptz, now())
+          FROM next_id
+          RETURNING *
+          `,
+          [
+            input.title,
+            input.description,
+            input.workspace,
+            input.maxReviewCycles,
+            input.assignedAgentId ?? null,
+            input.now ?? null,
+          ]
+        );
+        return mapTask(requireRow(rows, "task.createAuto"));
+      })
     );
   }
 

@@ -92,6 +92,7 @@ export const CODER_AGENT_KEY = "coder-agent";
 export const REVIEWER_AGENT_KEY = "reviewer-agent";
 
 export function workspacePathFor(workspaceRoot: string, task: TaskSpec): string {
+  if (task.workspacePath) return task.workspacePath;
   const slug = task.workspaceSlug ?? task.id;
   return join(workspaceRoot, slug);
 }
@@ -167,7 +168,7 @@ export class OrchestratorService {
   /** The run itself. See the class header for the state flow. */
   private async execute(spec: TaskSpec): Promise<TaskRecord> {
     const workspacePath = workspacePathFor(this.config.orchestrator.workspaceRoot, spec);
-    const workspace = new Workspace(workspacePath);
+    const workspace = new Workspace(workspacePath, { createIfNotExists: !spec.workspacePath });
 
     const record: TaskRecord = {
       id: spec.id,

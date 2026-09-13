@@ -11,7 +11,7 @@
 import * as React from "react";
 
 import { Button, Panel, PanelBody, PanelHeader, PanelTitle } from "./ui.js";
-import { apiPost } from "../lib/use-api.js";
+import { apiPost, apiGet } from "../lib/use-api.js";
 import type { TaskView } from "../../src/dashboard/service.js";
 
 export interface CreateTaskFormProps {
@@ -25,11 +25,22 @@ export function CreateTaskForm({ onCreated, className, defaultOpen = false }: Cr
   const [open, setOpen] = React.useState(defaultOpen);
   const [title, setTitle] = React.useState("");
   const [description, setDescription] = React.useState("");
+  const [autoGenerate, setAutoGenerate] = React.useState(true);
   const [externalId, setExternalId] = React.useState("");
+  const [nextId, setNextId] = React.useState<string | null>(null);
+  const [workspace, setWorkspace] = React.useState("");
   const [maxCycles, setMaxCycles] = React.useState("3");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | undefined>(undefined);
   const [notice, setNotice] = React.useState<string | undefined>(undefined);
+
+  React.useEffect(() => {
+    if (open && autoGenerate) {
+      void apiGet<{ nextId: string }>("/api/tasks/next-id")
+        .then((data) => setNextId(data.nextId))
+        .catch(() => setNextId(null));
+    }
+  }, [open, autoGenerate]);
 
   const submit = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault();
@@ -40,7 +51,8 @@ export function CreateTaskForm({ onCreated, className, defaultOpen = false }: Cr
     const result = await apiPost<TaskView>("/api/tasks", {
       title: title.trim(),
       description: description.trim(),
-      ...(externalId.trim() ? { externalId: externalId.trim() } : {}),
+      ...(autoGenerate ? { autoGenerateId: true } : (externalId.trim() ? { externalId: externalId.trim() } : {})),
+      ...(workspace.trim() ? { workspace: workspace.trim() } : {}),
       maxReviewCycles: Number(maxCycles) || 3,
     });
 
@@ -55,6 +67,15 @@ export function CreateTaskForm({ onCreated, className, defaultOpen = false }: Cr
     setTitle("");
     setDescription("");
     setExternalId("");
+    setWorkspace("");
+    
+    // Refresh the next ID preview
+    if (autoGenerate) {
+      void apiGet<{ nextId: string }>("/api/tasks/next-id")
+        .then((data) => setNextId(data.nextId))
+        .catch(() => setNextId(null));
+    }
+    
     onCreated?.(result.data);
   };
 
@@ -89,14 +110,26 @@ export function CreateTaskForm({ onCreated, className, defaultOpen = false }: Cr
         <form onSubmit={(event) => void submit(event)} className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block">
-              <span className="text-[10px] font-semibold tracking-[0.12em] text-[var(--content-faint)] uppercase">
-                External id
-              </span>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] font-semibold tracking-[0.12em] text-[var(--content-faint)] uppercase">
+                  External id
+                </span>
+                <label className="flex items-center gap-1.5 text-[10px] text-[var(--content-faint)] cursor-pointer hover:text-[var(--content)]">
+                  <input
+                    type="checkbox"
+                    checked={autoGenerate}
+                    onChange={(e) => setAutoGenerate(e.target.checked)}
+                    className="cursor-pointer"
+                  />
+                  Auto Generate
+                </label>
+              </div>
               <input
-                value={externalId}
+                disabled={autoGenerate}
+                value={autoGenerate ? "" : externalId}
                 onChange={(event) => setExternalId(event.target.value)}
-                placeholder="auto (TASK-…)"
-                className="mt-1 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 font-mono text-[11px] text-[var(--content)]"
+                placeholder={autoGenerate ? (nextId ? `Next ID: ${nextId}` : "auto (fetching…)") : "e.g. TASK-012"}
+                className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 font-mono text-[11px] text-[var(--content)] disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </label>
 
@@ -114,6 +147,18 @@ export function CreateTaskForm({ onCreated, className, defaultOpen = false }: Cr
               />
             </label>
           </div>
+
+          <label className="block">
+            <span className="text-[10px] font-semibold tracking-[0.12em] text-[var(--content-faint)] uppercase">
+              Project Workspace
+            </span>
+            <input
+              value={workspace}
+              onChange={(event) => setWorkspace(event.target.value)}
+              placeholder="e.g. D:\Tan\script\Asist v1.0.0\PROJECT (optional)"
+              className="mt-1 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 text-[11px] text-[var(--content)]"
+            />
+          </label>
 
           <label className="block">
             <span className="text-[10px] font-semibold tracking-[0.12em] text-[var(--content-faint)] uppercase">

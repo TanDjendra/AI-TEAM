@@ -59,6 +59,11 @@ export interface TaskSpec {
    * root with this slug (e.g. "TASK-001") instead of running in `repoPath`.
    */
   workspaceSlug?: string;
+  /**
+   * Optional absolute path to an existing project directory.
+   * If provided, the orchestrator uses this exactly as the workspace root.
+   */
+  workspacePath?: string;
 }
 
 export type AttemptKind = "CODER" | "REVIEWER";

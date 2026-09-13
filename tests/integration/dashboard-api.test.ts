@@ -202,6 +202,10 @@ describe("GET /api/agents/:id", () => {
   });
 });
 
+import { homedir } from "node:os";
+import { parse, resolve, join } from "node:path";
+import { symlinkSync, rmSync, mkdirSync } from "node:fs";
+
 describe("POST /api/tasks", () => {
   it("creates a real task row and journals TASK_CREATED", async () => {
     const response = await postTask(
@@ -253,6 +257,147 @@ describe("POST /api/tasks", () => {
       }),
     );
     expect(second.status).toBe(409);
+  });
+
+  it("accepts a valid absolute project workspace", async () => {
+    const response = await postTask(
+      new Request("http://localhost/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          externalId: "TASK-API-WS",
+          title: "API created task with workspace",
+          description: "Created through the control API with a workspace.",
+          workspace: process.cwd(),
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { ok: boolean; data: { workspace: string } };
+    expect(body.data.workspace).toBe(process.cwd());
+  });
+
+  it("rejects a relative workspace path", async () => {
+    const response = await postTask(
+      new Request("http://localhost/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "T", description: "D", workspace: "./src" }),
+      }),
+    );
+    expect(response.status).toBe(422);
+    const text = await response.text();
+    expect(text).toContain("must be an absolute path");
+  });
+
+  it("rejects a non-existent workspace path", async () => {
+    const response = await postTask(
+      new Request("http://localhost/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "T", description: "D", workspace: process.cwd() + "/DOES_NOT_EXIST_ABC" }),
+      }),
+    );
+    expect(response.status).toBe(422);
+    const text = await response.text();
+    expect(text).toContain("does not exist");
+  });
+
+  it("rejects path traversal attempting to escape", async () => {
+    // If we give something like C:\Windows\System32\..\..
+    // It should resolve to C:\ and be blocked by root drive policy
+    const root = parse(process.cwd()).root;
+    const traversal = join(root, "Windows", "..", "..");
+    const response = await postTask(
+      new Request("http://localhost/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "T", description: "D", workspace: traversal }),
+      }),
+    );
+    expect(response.status).toBe(422);
+    expect(await response.text()).toContain("forbidden by security policy");
+  });
+
+  it("rejects system directories like Windows", async () => {
+    const root = parse(process.cwd()).root;
+    const response = await postTask(
+      new Request("http://localhost/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "T", description: "D", workspace: join(root, "Windows") }),
+      }),
+    );
+    expect(response.status).toBe(422);
+    expect(await response.text()).toContain("forbidden by security policy");
+  });
+
+  it("rejects root drive", async () => {
+    const root = parse(process.cwd()).root;
+    const response = await postTask(
+      new Request("http://localhost/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "T", description: "D", workspace: root }),
+      }),
+    );
+    expect(response.status).toBe(422);
+    expect(await response.text()).toContain("forbidden by security policy");
+  });
+
+  it("rejects user home root", async () => {
+    const response = await postTask(
+      new Request("http://localhost/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "T", description: "D", workspace: homedir() }),
+      }),
+    );
+    expect(response.status).toBe(422);
+    expect(await response.text()).toContain("forbidden by security policy");
+  });
+
+  it("accepts valid nested project under home", async () => {
+    const nested = join(homedir(), "Documents", "MyProject-Test-Temp-Workspace");
+    try {
+      mkdirSync(nested, { recursive: true });
+      const response = await postTask(
+        new Request("http://localhost/api/tasks", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ externalId: "TASK-NESTED", title: "T", description: "D", workspace: nested }),
+        }),
+      );
+      expect(response.status).toBe(201);
+    } finally {
+      rmSync(nested, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects symlink escape to forbidden root", async () => {
+    // We use homedir because we know it exists, unlike C:\Windows which might be D:\Windows in the test environment
+    const target = homedir();
+    const symlinkPath = join(process.cwd(), ".data", "test-symlink-forbidden");
+    try {
+      symlinkSync(target, symlinkPath, "junction");
+    } catch (e) {
+      // If we can't create a symlink, skip the test
+      return;
+    }
+    try {
+      const response = await postTask(
+        new Request("http://localhost/api/tasks", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: "T", description: "D", workspace: symlinkPath }),
+        }),
+      );
+      expect(response.status).toBe(422);
+      expect(await response.text()).toContain("forbidden by security policy");
+    } finally {
+      rmSync(symlinkPath, { force: true });
+    }
   });
 });
 

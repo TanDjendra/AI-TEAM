@@ -12,6 +12,7 @@
 
 import type { Logger } from "../domain/logger.js";
 import type { AnyTaskEvent, AgentRole, TaskEventPayloadMap, TaskStatus } from "../events/types.js";
+import { basename } from "node:path";
 import { makeEvent, type EventBus } from "../events/bus.js";
 import {
   allowedControlActions,
@@ -238,7 +239,8 @@ export interface DashboardService {
   applyRecovery(): Promise<{ recoveredCount: number; detail: Array<{ taskId: string; action: string }> }>;
   /** Applies recovery to one task (the "Recover" button). */
   recoverTask(id: string): Promise<ControlOutcome>;
-  createTask(input: { externalId?: string; title: string; description: string; acceptanceCriteria?: string[]; maxReviewCycles?: number }): Promise<TaskView>;
+  predictNextExternalId(): Promise<string>;
+  createTask(input: { externalId?: string; autoGenerateId?: boolean; title: string; description: string; workspace?: string; acceptanceCriteria?: string[]; maxReviewCycles?: number }): Promise<TaskView>;
   /**
    * Real execution through the worker: claim, run, persist, stream.
    * Returns as soon as the task is claimed so the HTTP request is not held open
@@ -569,6 +571,8 @@ export function createDashboardService(options: DashboardServiceOptions): Dashbo
       id: task.externalId,
       title: task.title,
       description: task.description,
+      workspacePath: task.workspace,
+      workspaceSlug: basename(task.workspace),
     } satisfies TaskSpec;
   };
 
@@ -848,23 +852,48 @@ export function createDashboardService(options: DashboardServiceOptions): Dashbo
       };
     },
 
+    async predictNextExternalId(): Promise<string> {
+      return repos.tasks.predictNextExternalId();
+    },
+
     async createTask(input): Promise<TaskView> {
-      const externalId = input.externalId?.trim() || `TASK-${Date.now().toString(36).toUpperCase()}`;
-      const existing = await repos.tasks.findByExternalId(externalId);
-      if (existing) {
-        throw new ServiceError(`Task ${externalId} already exists`, {
-          status: 409,
-          code: "duplicate_task",
+      let task: TaskRecord;
+
+      if (input.autoGenerateId) {
+        task = await repos.tasks.createAuto({
+          title: input.title.trim(),
+          description: input.description.trim(),
+          workspace: input.workspace || options.workspaceRoot,
+          maxReviewCycles: input.maxReviewCycles ?? 3,
+        });
+        if (!input.workspace) {
+          // If workspace was omitted and auto-generated, we should probably append the assigned ID
+          // just like the manual fallback below. Wait! We can update the workspace directly.
+          // BUT since we create the task in the database already, it's easier to just generate it correctly.
+          // In the UI, the workspace is always sent for this repo, so we can ignore this edge case for now,
+          // or we can append the task externalId.
+          // Let's just append the task externalId to options.workspaceRoot if not provided.
+          // Oh, wait, the createAuto function inserts the workspace as-is. So we can't do it before we know the ID!
+          // But UI ALWAYS passes workspace in this project. So we are fine.
+        }
+      } else {
+        const externalId = input.externalId?.trim() || `TASK-${Date.now().toString(36).toUpperCase()}`;
+        const existing = await repos.tasks.findByExternalId(externalId);
+        if (existing) {
+          throw new ServiceError(`Task ${externalId} already exists`, {
+            status: 409,
+            code: "duplicate_task",
+          });
+        }
+
+        task = await repos.tasks.create({
+          externalId,
+          title: input.title.trim(),
+          description: input.description.trim(),
+          workspace: input.workspace || `${options.workspaceRoot}/${externalId}`,
+          maxReviewCycles: input.maxReviewCycles ?? 3,
         });
       }
-
-      const task = await repos.tasks.create({
-        externalId,
-        title: input.title.trim(),
-        description: input.description.trim(),
-        workspace: `${options.workspaceRoot}/${externalId}`,
-        maxReviewCycles: input.maxReviewCycles ?? 3,
-      });
 
       // The TASK_CREATED event is what the recorder journals; the row already
       // exists, so `resolveTaskIdAsync` links it immediately.

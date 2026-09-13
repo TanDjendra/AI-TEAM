@@ -8,7 +8,7 @@
  */
 
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { mkdirSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
@@ -49,9 +49,15 @@ export class Workspace {
   private readonly writes = new Map<string, { hash: string; bytes: number }>();
   private readonly createdPaths = new Set<string>();
 
-  constructor(root: string) {
+  constructor(root: string, options?: { createIfNotExists?: boolean }) {
     const resolved = resolve(root);
-    mkdirSync(resolved, { recursive: true });
+    if (options?.createIfNotExists === false) {
+      if (!existsSync(resolved)) {
+        throw new Error(`Workspace path does not exist: ${resolved}`);
+      }
+    } else {
+      mkdirSync(resolved, { recursive: true });
+    }
     this.root = realpathSync(resolved);
   }
 
