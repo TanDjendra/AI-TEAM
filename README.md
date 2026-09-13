@@ -4,24 +4,24 @@ Fondasi **core** untuk sebuah software engineering team otonom:
 
 ```
 Project Owner
-      â”‚
-      â–¼
+      │
+      ▼
  Orchestrator            â† state machine + review loop + budget
-      â”‚
-      â”œâ”€â”€â–º Coder Agent    (grip/deepseek-v4.1-flash via 9Router)
-      â”‚         â”‚
-      â”‚         â–¼
-      â””â”€â”€â–º Reviewer Agent (grip/gpt-5.6-luna via 9Router)
+      │
+      ├──► Coder Agent    (grip/deepseek-v4.1-flash via 9Router)
+      │         │
+      │         ▼
+      └──► Reviewer Agent (grip/gpt-5.6-luna via 9Router)
 ```
 
 Alur kerja:
 
 ```
-TASK â†’ CODING â†’ TESTING â†’ REVIEW
-                            â”œâ”€â”€ APPROVED â†’ DONE
-                            â””â”€â”€ REJECTED â†’ FIXING â†’ TESTING â†’ REVIEW â€¦
+TASK → CODING → TESTING → REVIEW
+                            ├── APPROVED → DONE
+                            └── REJECTED → FIXING → TESTING → REVIEW …
                                                         (maks 3 siklus review)
-                            budget habis â†’ NEEDS_HUMAN
+                            budget habis → NEEDS_HUMAN
 ```
 
 Belum ada dashboard, dan memang tidak ada di ruang lingkup ini.
@@ -39,9 +39,9 @@ Setiap pemanggilan tool mengembalikan *metadata terstruktur*: exit code asli,
 
 **1b. Tool calling native + pemulihan tool-call berbentuk teks.** Tool dikirim
 sebagai definisi fungsi OpenAI (`tools`), dan `tool_calls` dari model dieksekusi
-langsung. Kalau model mengeluarkan tool call sebagai **teks** â€” XML
-`<tool_call><invoke name="â€¦">` (inilah yang DeepSeek V4.1 Flash lakukan) atau JSON
-ber-fence â€” panggilan itu tetap dideteksi dan dieksekusi. Teks **tidak pernah**
+langsung. Kalau model mengeluarkan tool call sebagai **teks** — XML
+`<tool_call><invoke name="…">` (inilah yang DeepSeek V4.1 Flash lakukan) atau JSON
+ber-fence — panggilan itu tetap dideteksi dan dieksekusi. Teks **tidak pernah**
 dianggap pekerjaan selesai.
 
 **2. Harness menimpa klaim model.** Ini inti sistemnya. `files_changed`,
@@ -57,7 +57,7 @@ dijalankan (`phase=NO_TEST_RUN`).
 
 **3. Reviewer independen secara struktural.** `ReviewerAgent` tidak punya
 `Workspace` dan tidak punya tool sama sekali. Ia hanya menerima teks bukti yang
-disusun harness dari filesystem nyata dan log eksekusi nyata â€” termasuk bagian
+disusun harness dari filesystem nyata dan log eksekusi nyata — termasuk bagian
 **"WHAT THE HARNESS COULD NOT VERIFY"** yang jujur menyebut apa yang tidak bisa
 dibuktikan.
 
@@ -84,7 +84,7 @@ ROUTER_VERIFY_ON_START=true               # opsional: gagal cepat saat start
 
 Dua jebakan 9Router yang sudah diverifikasi, dan kenapa desainnya begini:
 
-1. **`GET /v1/models` tidak menegakkan auth** â€” request tanpa key tetap `200 OK`.
+1. **`GET /v1/models` tidak menegakkan auth** — request tanpa key tetap `200 OK`.
    Artinya model listing bukan bukti kredensial valid. Karena itu:
    - `ProviderHealth.authVerified` selalu `false` untuk hasil `health()`;
    - ada `verifyChat(model)` yang mengirim completion nyata (`max_tokens: 1`)
@@ -96,7 +96,7 @@ Dua jebakan 9Router yang sudah diverifikasi, dan kenapa desainnya begini:
    kredensial router). Sudah dihapus, dan ada test yang mengunci perilaku itu.
 
 Konsekuensinya: kalau `ROUTER_API_KEY` kosong, `loadConfig()` menolak start
-dengan pesan jelas â€” bukan gagal diam-diam di tengah run.
+dengan pesan jelas — bukan gagal diam-diam di tengah run.
 
 ---
 
@@ -216,7 +216,7 @@ Reviewer (wajib dari model):
 ```
 
 Field tambahan **yang ditambahkan harness** (bukan model) pada output coder:
-`executed_commands[]` â€” daftar perintah yang benar-benar dijalankan beserta exit
+`executed_commands[]` — daftar perintah yang benar-benar dijalankan beserta exit
 code aslinya. Inilah yang diverifikasi reviewer.
 
 ---
@@ -232,22 +232,22 @@ code aslinya. Inilah yang diverifikasi reviewer.
 | REJECTED | FIXING |
 | FIXING | TESTING |
 | APPROVED | DONE |
-| DONE / NEEDS_HUMAN | â€” (terminal) |
+| DONE / NEEDS_HUMAN | — (terminal) |
 
 Transisi ilegal melempar `IllegalStateTransitionError`; tidak ada jalur "diam-diam
 lanjut".
 
 Dua catatan desain yang disengaja, keduanya keluar dari spesifikasi literal:
 
-1. **`APPROVED â†’ DONE` ditambahkan.** Tanpa edge itu, `DONE` tidak punya
+1. **`APPROVED → DONE` ditambahkan.** Tanpa edge itu, `DONE` tidak punya
    predecessor dan acceptance criteria (`final state DONE`) mustahil dipenuhi.
-2. **`FAILED â†’ REJECTED â†’ â€¦` disederhanakan menjadi `REJECTED â†’ FIXING`.** Karena
+2. **`FAILED → REJECTED → …` disederhanakan menjadi `REJECTED → FIXING`.** Karena
    tiap review pass sudah terbatas `MAX_REVIEW_CYCLES` (dan setiap run di-bounds
    `maxAgentAttempts` per pemanggilan), state `FAILED` terpisah hanya akan menjadi
    alias dari `REJECTED` dan merusak invarian "satu `REJECTED` = satu siklus".
 
 Cara berhenti saat budget habis: orkestrator mencatat state terminal langsung
-lewat `reachableTerminal()` (mis. `REVIEW â†’ NEEDS_HUMAN`), bukan dengan
+lewat `reachableTerminal()` (mis. `REVIEW → NEEDS_HUMAN`), bukan dengan
 menciptakan edge transisi palsu. Jadi tabel di atas tetap deskripsi jalur normal,
 sementara kehabisan budget adalah keputusan kebijakan, bukan transisi.
 
@@ -263,7 +263,7 @@ sementara kehabisan budget adalah keputusan kebijakan, bukan transisi.
 | 2 | 2 | 2 |
 | **3 (default)** | **3** | **3** |
 
-Setelah pass terakhir ditolak, tidak ada budget untuk fix â€” loop berhenti dengan
+Setelah pass terakhir ditolak, tidak ada budget untuk fix — loop berhenti dengan
 `NEEDS_HUMAN` dan `stopReason: "MAX_REVIEW_CYCLES"`.
 
 Reviewer **selalu** dipanggil, termasuk pada pass terakhir. Tidak ada jalur
@@ -274,10 +274,10 @@ Reviewer **selalu** dipanggil, termasuk pada pass terakhir. Tidak ada jalur
 
 ### Jaring pengaman struktural
 
-- `APPROVED` dengan severity `HIGH`/`CRITICAL` â†’ otomatis diturunkan jadi
+- `APPROVED` dengan severity `HIGH`/`CRITICAL` → otomatis diturunkan jadi
   `REJECTED`.
-- `APPROVED` dengan `required_fixes` tidak kosong â†’ otomatis `REJECTED`.
-- Verdict tidak terbaca â†’ `REJECTED` (tidak pernah "approve karena bingung").
+- `APPROVED` dengan `required_fixes` tidak kosong → otomatis `REJECTED`.
+- Verdict tidak terbaca → `REJECTED` (tidak pernah "approve karena bingung").
 - Semua panggilan agent yang gagal di-retry sampai `MAX_AGENT_ATTEMPTS`; hanya
   kegagalan *infrastruktur* (tidak ada contract yang bisa dibaca + ada `error`)
   yang menghentikan run. Coder yang jujur melapor `BLOCKED` tetap diteruskan ke
@@ -287,9 +287,9 @@ Reviewer **selalu** dipanggil, termasuk pada pass terakhir. Tidak ada jalur
 
 ## 8. Hasil verifikasi
 
-- `npm run typecheck` â€” bersih (`tsc --noEmit`, strict)
-- `npm test` â€” **133 lulus**, 9 live test di-skip kecuali `RUN_LIVE=1`
-- **E2E `TASK-001` â†’ `DONE`** lewat 9Router (lihat di bawah)
+- `npm run typecheck` — bersih (`tsc --noEmit`, strict)
+- `npm test` — **133 lulus**, 9 live test di-skip kecuali `RUN_LIVE=1`
+- **E2E `TASK-001` → `DONE`** lewat 9Router (lihat di bawah)
 
 ### E2E nyata: TASK-001
 
@@ -315,13 +315,13 @@ Semuanya sudah ditangani, dan masing-masing punya test:
   "tool_calls"` + `message.tool_calls[]`, untuk `grip/deepseek-v4.1-flash`
   maupun `grip/gpt-5.6-luna`. `tool_choice` juga diterima.
 - **Model juga bisa mengeluarkan tool call sebagai teks.** DeepSeek V4.1 Flash
-  pernah mengirim `<tool_call><invoke name="bash">â€¦` dalam `content`. Ini pernah
+  pernah mengirim `<tool_call><invoke name="bash">…` dalam `content`. Ini pernah
   membuat seluruh task gagal (lihat bagian 9) dan sekarang dipulihkan, bukan
   dianggap jawaban final.
-- `data: [DONE]` ikut dikirim pada respons **non-stream** â†’ `response.json()`
+- `data: [DONE]` ikut dikirim pada respons **non-stream** → `response.json()`
   polos gagal. Ditangani `stripTrailingSseFrames()` dengan pemindaian brace yang
   sadar-string (bukan `indexOf("data:")`, yang akan memotong payload valid).
-- `GET /v1/models` **tidak butuh auth** â†’ tidak bisa dipakai memvalidasi key.
+- `GET /v1/models` **tidak butuh auth** → tidak bisa dipakai memvalidasi key.
 - Secret CLI di disk **bukan** kredensial API yang valid (401).
 - `/v1/chat/completions` menegakkan auth (401 tanpa key yang benar).
 
@@ -351,12 +351,12 @@ native**, sementara kode hanya mengenali satu bentuk: fenced JSON ` ```tool `.
 **Root cause:** prompt meminta satu format yang tidak native bagi model, dan
 router tidak diberikan definisi `tools` sama sekali. Karena itu:
 
-1. Router tidak pernah mengirim `tools` â†’ model mengarang protokol sendiri (XML).
-2. Parser tidak mengenali XML â†’ teks itu dianggap **jawaban final**.
-3. Tidak ada JSON contract â†’ `BLOCKED`, workspace kosong.
+1. Router tidak pernah mengirim `tools` → model mengarang protokol sendiri (XML).
+2. Parser tidak mengenali XML → teks itu dianggap **jawaban final**.
+3. Tidak ada JSON contract → `BLOCKED`, workspace kosong.
 4. Reviewer menolak dengan benar, 3 siklus habis, `NEEDS_HUMAN`.
 
-Jadi kegagalannya ada di sisi implementasi (antarmuka tool), bukan di model â€”
+Jadi kegagalannya ada di sisi implementasi (antarmuka tool), bukan di model —
 dan reviewer **tidak** disentuh untuk memperbaikinya.
 
 **Perbaikan:**
@@ -373,8 +373,8 @@ dan reviewer **tidak** disentuh untuk memperbaikinya.
    `tests_passed: false` padahal verdict-nya `APPROVED`. Sekarang **test run
    terakhir** yang otoritatif, dan kegagalan sebelumnya dilaporkan sebagai catatan.
    (Timeout tetap menggagalkan run.)
-5. Instruksi eksplisit per fase: initial â†’ *"You are an autonomous coding agent.
-   Do not merely explain what should be doneâ€¦"*; fix â†’ *"Do not only describe the
+5. Instruksi eksplisit per fase: initial → *"You are an autonomous coding agent.
+   Do not merely explain what should be done…"*; fix → *"Do not only describe the
    fixes. Actually modify the files and run the tests."*
 
 **Regression test** yang mengunci bug ini:
@@ -417,12 +417,12 @@ tidak pernah membaca file log.
 
 ```
 OrchestratorService
-   â”‚  hooks (opsional)
-   â–¼
-OrchestratorHooks â”€â”€â–º EventBus â”€â”€â”¬â”€â”€â–º EventRecorder â”€â”€â–º PostgreSQL
-   â”‚                             â”‚        (activity_logs + proyeksi tabel)
-   â”‚                             â””â”€â”€â–º EventTransport â”€â”€â–º dashboard (realtime)
-   â””â”€â”€ AgentObserver â”€â”€â–º agent (tool call / file / test)
+   │  hooks (opsional)
+   ▼
+OrchestratorHooks ──► EventBus ──┬──► EventRecorder ──► PostgreSQL
+   │                             │        (activity_logs + proyeksi tabel)
+   │                             └──► EventTransport ──► dashboard (realtime)
+   └── AgentObserver ──► agent (tool call / file / test)
 ```
 
 ### Batas tanggung jawab
@@ -443,7 +443,7 @@ OrchestratorHooks â”€â”€â–º EventBus â”€â”€â”¬â”�
 | `agents` | identitas + status agent (`IDLE`/`WORKING`/`REVIEWING`/`ERROR`/`OFFLINE`) | `agent_key` unik |
 | `tasks` | state task, siklus, `stop_reason`, `transition_seq` | `external_id` unik, `transition_seq` monoton |
 | `task_runs` | satu eksekusi task | `run_id` unik |
-| `reviews` | satu baris per review pass | `unique (task_id, cycle)` â†’ tidak bisa ditimpa |
+| `reviews` | satu baris per review pass | `unique (task_id, cycle)` → tidak bisa ditimpa |
 | `activity_logs` | jurnal event + **ledger idempotency** | `event_id` primary key, `publish_seq` monoton |
 | `tool_calls` | setiap tool call coder | `unique (task_id, tool_call_id)` |
 | `file_changes` | metadata perubahan file (**bukan isi file**) | `unique (task_id, path)` |
@@ -459,12 +459,12 @@ PG13) sehingga jalan di Postgres manapun, termasuk PGlite.
 sekaligus jadi **idempotency key**.
 
 ```
-orchestrator â†’ hooks.publish(TYPE, payload)
-             â†’ bus.publish(event)
-                 â”œâ”€â”€ listener (recorder)  â†’ activity_logs (on conflict do nothing)
-                 â”‚                          + proyeksi: tool_calls/file_changes/
-                 â”‚                            test_results/reviews/agents
-                 â””â”€â”€ transports           â†’ InMemory / WebSocket / Supabase Realtime
+orchestrator → hooks.publish(TYPE, payload)
+             → bus.publish(event)
+                 ├── listener (recorder)  → activity_logs (on conflict do nothing)
+                 │                          + proyeksi: tool_calls/file_changes/
+                 │                            test_results/reviews/agents
+                 └── transports           → InMemory / WebSocket / Supabase Realtime
 ```
 
 Untuk `STATE_CHANGED` ada aturan urutan khusus: **transisi DB ditulis lebih dulu**
@@ -483,7 +483,7 @@ duplikat dan tidak menulis dua kali. Hasilnya selalu tepat satu baris
 | `CompositeEventTransport` | fan-out ke semuanya |
 
 Tidak ada koneksi realtime eksternal yang dipaksa: kalau tidak dikonfigurasi,
-in-memory tetap jalan. Semua transport bersifat *non-blocking* â€” sink yang mati
+in-memory tetap jalan. Semua transport bersifat *non-blocking* — sink yang mati
 dilaporkan lewat `onError`, tidak pernah menghentikan task.
 
 ### Idempotency, atomicity, concurrency
@@ -499,24 +499,24 @@ dilaporkan lewat `onError`, tidak pernah menghentikan task.
 
 ### Recovery
 
-- **Proses crash** â†’ `runRepository.listStale()` menemukan run yang masih
+- **Proses crash** → `runRepository.listStale()` menemukan run yang masih
   `RUNNING` untuk ditandai `INTERRUPTED`.
-- **Agent/database error** â†’ dilaporkan; task tidak pernah jadi `DONE`.
-- **Event publish gagal** â†’ dilaporkan ke `onError`, task tetap jalan.
-- **Jurnal gagal (fatal)** â†’ `completionBlocker` aktif; task yang sudah
+- **Agent/database error** → dilaporkan; task tidak pernah jadi `DONE`.
+- **Event publish gagal** → dilaporkan ke `onError`, task tetap jalan.
+- **Jurnal gagal (fatal)** → `completionBlocker` aktif; task yang sudah
   `APPROVED` **tetap tidak** menjadi `DONE` melainkan `NEEDS_HUMAN`. Ini yang
   menjamin "jangan membuat task terlihat DONE jika persistence gagal fatal".
-- **Task terinterupsi** â†’ `taskRepository.release()` melepas assignment tanpa
+- **Task terinterupsi** → `taskRepository.release()` melepas assignment tanpa
   berpura-pura selesai.
 
 ### Keamanan data
 
 Semua yang masuk database melewati `redact()`: key berbau kredensial
-(`apiKey`, `authorization`, `token`, `password`, `cookie`, â€¦) menjadi
+(`apiKey`, `authorization`, `token`, `password`, `cookie`, …) menjadi
 `[REDACTED]`, nilai yang mengandung secret di-scrub, body besar
-(`content`, `raw`, â€¦) diganti `[omitted N chars]`, kedalaman/array dibatasi.
+(`content`, `raw`, …) diganti `[omitted N chars]`, kedalaman/array dibatasi.
 Output perintah dipotong `summarizeOutput()` (head+tail, 2000 char). **Isi file
-tidak pernah disimpan** â€” hanya path, tipe perubahan, ringkasan, dan hash git bila
+tidak pernah disimpan** — hanya path, tipe perubahan, ringkasan, dan hash git bila
 ada.
 
 ### Menjalankan dengan database
@@ -534,7 +534,7 @@ Tanpa `DATABASE_URL`, semuanya tetap berjalan seperti sebelumnya (in-memory).
 
 ### Test
 
-- **59 integration test** berjalan di atas **PostgreSQL sungguhan** (PGlite â€”
+- **59 integration test** berjalan di atas **PostgreSQL sungguhan** (PGlite —
   Postgres 18 dikompilasi ke WASM): transaksi, rollback, advisory lock, unique
   constraint, `gen_random_uuid`. Tidak ada mock database.
 - Cakupan: migrasi, agent status, task persistence, transisi atomic, idempotency
@@ -564,7 +564,7 @@ satu baris pun di `src/`.
 |---|---|
 | `/` | Command Center: header sistem, 2 agent card, task board, review center, live activity, form create task |
 | `/tasks` | Board + tabel semua task |
-| `/tasks/[id]` | Tabs: Overview Â· Timeline Â· Runs Â· Reviews Â· Tools Â· Files Â· Tests |
+| `/tasks/[id]` | Tabs: Overview · Timeline · Runs · Reviews · Tools · Files · Tests |
 | `/agents` | Daftar agent |
 | `/agents/[id]` | Detail agent: model, status, task, counter, activity, tool calls |
 | `/activity` | Feed activity (realtime + historis) |
@@ -595,21 +595,21 @@ POST /api/tasks/:id/approve        POST /api/tasks/:id/run
 `/run` menjalankan orchestrator sungguhan (agent + 9Router) **di dalam proses
 dashboard**, memakai ulang stack persistence yang sama sehingga event-nya mengalir
 ke bus yang sedang dibaca browser. Setiap action dicatat sebagai activity/event
-nyata â€” tidak ada tombol yang hanya mengubah state React.
+nyata — tidak ada tombol yang hanya mengubah state React.
 
 ### Realtime: kenapa lewat database
 
 Temuan penting: **orkestrator dan dashboard adalah proses terpisah.** Event bus
-in-process tidak bisa menjembatani itu â€” event yang dipublikasikan orkestrator
+in-process tidak bisa menjembatani itu — event yang dipublikasikan orkestrator
 tidak akan pernah terlihat dashboard.
 
 Karena database adalah source of truth (setiap event dijurnal ke `activity_logs`
 dengan `publish_seq` monoton), stream SSE membaca **jurnal**, bukan bus:
 
-1. `hello` â€” status database + transports
-2. backlog â€” 100 baris terakhir dari jurnal
+1. `hello` — status database + transports
+2. backlog — 100 baris terakhir dari jurnal
 3. `backlog-complete`
-4. event live â€” baris dengan `publish_seq` > cursor, di-poll tiap 1s
+4. event live — baris dengan `publish_seq` > cursor, di-poll tiap 1s
 
 Cursor hanya maju setelah baris benar-benar dikirim, dan client melakukan dedupe
 berdasarkan event id, sehingga reconnect tidak menggandakan tampilan dan tidak ada
@@ -638,15 +638,15 @@ npx next dev -p 3100   # development
 Dashboard membaca `PGLITE_DATA_DIR` (embedded Postgres, single-process) atau
 `DATABASE_URL`.
 
-**Catatan penting:** PGlite bersifat single-process â€” dashboard dan CLI tidak
+**Catatan penting:** PGlite bersifat single-process — dashboard dan CLI tidak
 boleh membuka direktori yang sama secara bersamaan (proses kedua akan membaca
 snapshot lama, sehingga event tidak terlihat realtime). Untuk menjalankan task
 dari dashboard, gunakan `POST /api/tasks/:id/run` yang berjalan di proses yang
 sama. Untuk produksi multi-proses, gunakan `DATABASE_URL` ke PostgreSQL
 sungguhan; desain streaming berbasis jurnal ini memang dibuat untuk itu.
 
- # #   1 3 .   H u m a n   C o n t r o l   &   O r c h e s t r a t i o n   R e c o v e r y   ( P H A S E   6 ) 
- 
+## 13. Human Control & Orchestration Recovery (PHASE 6)
+
 
 ## 13. Human Control & Orchestration Recovery (PHASE 6)
 
