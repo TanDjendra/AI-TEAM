@@ -18,6 +18,8 @@ import {
   extractJsonObject,
   parseToolCalls,
 } from "../../src/agents/base-agent.js";
+import type { RunSession } from "../../src/domain/run-session.js";
+import type { ReviewEvidence } from "../../src/domain/review-evidence.js";
 import { cleanupDir, makeTempDir } from "../helpers/index.js";
 
 /**
@@ -113,6 +115,24 @@ const FINAL_DONE = JSON.stringify({
   notes: "",
 });
 
+const dummySession: RunSession = {
+  taskRunId: "run-123",
+  taskId: "TASK-001",
+  task: TASK,
+  control: { },
+  agentKeys: { coder: "coder-1", reviewer: "reviewer-1" },
+  agentIds: { coder: "coder-1", reviewer: "reviewer-1" },
+};
+
+const dummyEvidence: ReviewEvidence = {
+  schemaVersion: 1,
+  task: dummySession.task,
+  verifiedFiles: [],
+  verifiedCommands: [],
+  testAssessment: { testsExecuted: true, allCommandsPassed: true, commandCount: 1, reason: "ok" },
+  verifierLimits: []
+};
+
 const logger = createLogger({ level: "error", sink: () => {} });
 
 /** A real, passing Node test file so `node --test` genuinely exits 0. */
@@ -134,7 +154,7 @@ afterEach(async () => {
 });
 
 function coderInput(overrides: Partial<AgentInput> = {}): AgentInput {
-  return { task: TASK, workspacePath: root, cycle: 1, reason: "INITIAL", ...overrides };
+  return { session: dummySession, task: TASK, workspacePath: root, cycle: 1, reason: "INITIAL", ...overrides };
 }
 
 function makeCoder(provider: ModelProvider, options: { maxToolTurns?: number } = {}) {
@@ -812,9 +832,18 @@ describe("ReviewerAgent — evidence-driven verification", () => {
     const provider = new ScriptedProvider([
       JSON.stringify({ verdict: "APPROVED", summary: "ok", issues: [], required_fixes: [], severity: "NONE" }),
     ]);
-    const agent = new ReviewerAgent({ provider, model: "grip/gpt-5.6-luna", workspace, logger });
+    const agent = new ReviewerAgent({ provider, model: "grip/gpt-5.6-luna", logger });
 
     await agent.execute({
+      session: dummySession,
+      reviewEvidence: {
+        schemaVersion: 1,
+        task: TASK,
+        verifiedFiles: [{ path: "src/index.js", bytes: IMPLEMENTATION.length, excerpt: IMPLEMENTATION, truncated: false }],
+        verifiedCommands: [{ command: "node --test", exitCode: 0, passed: true, timedOut: false, note: "exit 0", output: "# pass 1" }],
+        testAssessment: { testsExecuted: true, allCommandsPassed: true, commandCount: 1, reason: "ok" },
+        verifierLimits: ["mocked limit"]
+      },
       task: TASK,
       workspacePath: root,
       cycle: 1,
@@ -835,9 +864,11 @@ describe("ReviewerAgent — evidence-driven verification", () => {
     const provider = new ScriptedProvider([
       JSON.stringify({ verdict: "REJECTED", summary: "no proof", issues: ["unverified"], required_fixes: ["run the tests"], severity: "HIGH" }),
     ]);
-    const agent = new ReviewerAgent({ provider, model: "m", workspace, logger });
+    const agent = new ReviewerAgent({ provider, model: "m", logger });
 
     await agent.execute({
+      session: dummySession,
+      reviewEvidence: dummyEvidence,
       task: TASK,
       workspacePath: root,
       cycle: 1,
@@ -860,8 +891,8 @@ describe("ReviewerAgent — evidence-driven verification", () => {
         severity: "MEDIUM",
       }),
     ]);
-    const agent = new ReviewerAgent({ provider, model: "m", workspace, logger });
-    const output = await agent.execute({ task: TASK, workspacePath: root, cycle: 1, reason: "INITIAL" });
+    const agent = new ReviewerAgent({ provider, model: "m", logger });
+    const output = await agent.execute({ session: dummySession, reviewEvidence: dummyEvidence, task: TASK, workspacePath: root, cycle: 1, reason: "INITIAL" });
 
     expect(output.verdict).toBe("REJECTED");
     expect(output.required_fixes).toEqual(["handle empty input"]);
@@ -871,8 +902,8 @@ describe("ReviewerAgent — evidence-driven verification", () => {
     const provider = new ScriptedProvider([
       JSON.stringify({ verdict: "APPROVED", summary: "sure", issues: ["data loss"], required_fixes: [], severity: "CRITICAL" }),
     ]);
-    const agent = new ReviewerAgent({ provider, model: "m", workspace, logger });
-    const output = await agent.execute({ task: TASK, workspacePath: root, cycle: 1, reason: "INITIAL" });
+    const agent = new ReviewerAgent({ provider, model: "m", logger });
+    const output = await agent.execute({ session: dummySession, reviewEvidence: dummyEvidence, task: TASK, workspacePath: root, cycle: 1, reason: "INITIAL" });
 
     expect(output.verdict).toBe("REJECTED");
     expect(output.summary).toContain("downgraded");
@@ -882,16 +913,16 @@ describe("ReviewerAgent — evidence-driven verification", () => {
     const provider = new ScriptedProvider([
       JSON.stringify({ verdict: "APPROVED", summary: "sure", issues: [], required_fixes: ["add the test"], severity: "NONE" }),
     ]);
-    const agent = new ReviewerAgent({ provider, model: "m", workspace, logger });
-    const output = await agent.execute({ task: TASK, workspacePath: root, cycle: 1, reason: "INITIAL" });
+    const agent = new ReviewerAgent({ provider, model: "m", logger });
+    const output = await agent.execute({ session: dummySession, reviewEvidence: dummyEvidence, task: TASK, workspacePath: root, cycle: 1, reason: "INITIAL" });
 
     expect(output.verdict).toBe("REJECTED");
   });
 
   it("never approves by accident when the verdict is unreadable", async () => {
     const provider = new ScriptedProvider(["probably fine?", "yeah looks good", "ok"]);
-    const agent = new ReviewerAgent({ provider, model: "m", workspace, logger });
-    const output = await agent.execute({ task: TASK, workspacePath: root, cycle: 1, reason: "INITIAL" });
+    const agent = new ReviewerAgent({ provider, model: "m", logger });
+    const output = await agent.execute({ session: dummySession, reviewEvidence: dummyEvidence, task: TASK, workspacePath: root, cycle: 1, reason: "INITIAL" });
 
     expect(output.verdict).toBe("REJECTED");
     expect(output.contractParsed).toBe(false);
@@ -913,8 +944,8 @@ describe("ReviewerAgent — evidence-driven verification", () => {
       health: async () => ({ ok: false, baseUrl: "http://failing.invalid/v1", latencyMs: 0 }),
     };
 
-    const agent = new ReviewerAgent({ provider: failing, model: "m", workspace, logger });
-    const output = await agent.execute({ task: TASK, workspacePath: root, cycle: 1, reason: "INITIAL" });
+    const agent = new ReviewerAgent({ provider: failing, model: "m", logger });
+    const output = await agent.execute({ session: dummySession, reviewEvidence: dummyEvidence, task: TASK, workspacePath: root, cycle: 1, reason: "INITIAL" });
 
     expect(output.verdict).toBe("REJECTED");
     expect(output.contractParsed).toBe(false);

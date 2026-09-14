@@ -201,6 +201,7 @@ describeLive("live agent run", () => {
 
       const output = (await agent.execute({
         task: LIVE_TASK,
+        session: { task: LIVE_TASK } as any,
         workspacePath: workspace.root,
         cycle: 1,
         reason: "INITIAL",

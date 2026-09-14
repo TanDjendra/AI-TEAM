@@ -21,6 +21,7 @@ import {
 } from "../events/transports.js";
 import type { AppConfig } from "../config/env.js";
 import type { Logger } from "../domain/logger.js";
+import type { UsageLedger } from "../domain/budget.js";
 import { createDb, type Db, type Driver } from "./db.js";
 import { PgDriver, type PgDriverOptions } from "./drivers.js";
 import { migrateFromDirectory, schemaIsReady } from "./migrate.js";
@@ -38,6 +39,9 @@ import { PostgresRunRepository } from "./repositories/run-repository.js";
 import { PostgresTaskRepository } from "./repositories/task-repository.js";
 import { PostgresTestResultRepository } from "./repositories/test-result-repository.js";
 import { PostgresToolCallRepository } from "./repositories/tool-call-repository.js";
+import { PostgresWorkflowRepository } from "./repositories/workflow-repository.js";
+import { PostgresWorkflowDependencyRepository } from "./repositories/workflow-dependency-repository.js";
+import { PostgresWorkflowArtifactRepository } from "./repositories/workflow-artifact-repository.js";
 
 export interface PersistenceOptions {
   config: AppConfig;
@@ -82,6 +86,7 @@ export interface Persistence {
   recorder: EventRecorder;
   repositories: RecorderRepositories;
   workers: WorkerRepository;
+  usageLedger: import("../domain/budget.js").UsageLedger;
   /** The transport events were actually routed to. */
   transport: EventTransport;
   /** Live agent ids keyed by role, for events that reference them. */
@@ -90,6 +95,13 @@ export interface Persistence {
   agentKeys: { coder: string; reviewer: string };
   /** Non-fatal problems worth surfacing at startup. */
   warnings: string[];
+  /**
+   * Phase V2-04: Workflow repositories — present only when
+   * config.orchestrator.workflowEnabled is true.
+   */
+  workflows?: PostgresWorkflowRepository;
+  workflowDeps?: PostgresWorkflowDependencyRepository;
+  workflowArtifacts?: PostgresWorkflowArtifactRepository;
   close(): Promise<void>;
 }
 
@@ -184,6 +196,10 @@ export async function createPersistence(
     logger.warn("persistence.schema_incomplete", {});
   }
 
+  const { PostgresWorkflowRepository } = await import("./repositories/workflow-repository.js");
+  const { PostgresWorkflowDependencyRepository } = await import("./repositories/workflow-dependency-repository.js");
+  const { PostgresWorkflowArtifactRepository } = await import("./repositories/workflow-artifact-repository.js");
+
   const repositories: RecorderRepositories = {
     tasks: new PostgresTaskRepository(db),
     agents: new PostgresAgentRepository(db),
@@ -194,7 +210,12 @@ export async function createPersistence(
     fileChanges: new PostgresFileChangeRepository(db),
     testResults: new PostgresTestResultRepository(db),
     interrupts: new PostgresInterruptRepository(db),
+    workflows: new PostgresWorkflowRepository(db),
+    workflowDependencies: new PostgresWorkflowDependencyRepository(db),
   };
+
+  const { PostgresUsageLedger } = await import("./repositories/usage-ledger.js");
+  const usageLedger = new PostgresUsageLedger(db);
 
   // Agents are registered up front so events can reference real ids.
   const coderAgent = await repositories.agents.upsert({
@@ -265,7 +286,19 @@ export async function createPersistence(
     transports: sinks.map((sink) => sink.name).join(","),
     coderAgentId: coderAgent.id,
     reviewerAgentId: reviewerAgent.id,
+    workflowEnabled: config.orchestrator?.workflowEnabled ?? false,
   });
+
+  // Phase V2-04: Workflow repositories — only instantiated when the flag is on.
+  const workflows = config.orchestrator?.workflowEnabled
+    ? new PostgresWorkflowRepository(db)
+    : undefined;
+  const workflowDeps = config.orchestrator?.workflowEnabled
+    ? new PostgresWorkflowDependencyRepository(db)
+    : undefined;
+  const workflowArtifacts = config.orchestrator?.workflowEnabled
+    ? new PostgresWorkflowArtifactRepository(db)
+    : undefined;
 
   return {
     db,
@@ -273,10 +306,14 @@ export async function createPersistence(
     recorder,
     repositories,
     workers: new PostgresWorkerRepository(db),
+    usageLedger,
     transport,
     agentIds,
     agentKeys: { coder: CODER_AGENT_KEY, reviewer: REVIEWER_AGENT_KEY },
     warnings,
+    workflows,
+    workflowDeps,
+    workflowArtifacts,
     close: async () => {
       await bus.close();
       // When the caller supplied the db, they own its lifetime.

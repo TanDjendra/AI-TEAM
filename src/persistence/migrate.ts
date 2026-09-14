@@ -117,6 +117,10 @@ export async function schemaIsReady(db: Db): Promise<boolean> {
     "tool_calls",
     "file_changes",
     "test_results",
+    // Phase V2-04: Workflow DAG tables
+    "workflows",
+    "workflow_nodes",
+    "workflow_dependencies",
   ];
 
   const rows = await db.query<{ table_name: string }>(

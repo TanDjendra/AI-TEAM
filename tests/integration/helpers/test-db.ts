@@ -23,6 +23,8 @@ import { PostgresRunRepository } from "../../../src/persistence/repositories/run
 import { PostgresTaskRepository } from "../../../src/persistence/repositories/task-repository.js";
 import { PostgresTestResultRepository } from "../../../src/persistence/repositories/test-result-repository.js";
 import { PostgresToolCallRepository } from "../../../src/persistence/repositories/tool-call-repository.js";
+import { PostgresWorkflowRepository } from "../../../src/persistence/repositories/workflow-repository.js";
+import { PostgresWorkflowDependencyRepository } from "../../../src/persistence/repositories/workflow-dependency-repository.js";
 
 export const MIGRATIONS_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -44,6 +46,8 @@ export interface TestDb {
   fileChanges: PostgresFileChangeRepository;
   testResults: PostgresTestResultRepository;
   interrupts: PostgresInterruptRepository;
+  workflows: PostgresWorkflowRepository;
+  workflowDependencies: PostgresWorkflowDependencyRepository;
   close(): Promise<void>;
 }
 
@@ -68,6 +72,8 @@ export async function createTestDb(): Promise<TestDb> {
     fileChanges: new PostgresFileChangeRepository(db),
     testResults: new PostgresTestResultRepository(db),
     interrupts: new PostgresInterruptRepository(db),
+    workflows: new PostgresWorkflowRepository(db),
+    workflowDependencies: new PostgresWorkflowDependencyRepository(db),
     close: () => db.close(),
   };
 }
@@ -98,7 +104,7 @@ export async function seedAgents(testDb: TestDb): Promise<{ coderId: string; rev
  */
 export async function resetTestDb(testDb: TestDb): Promise<void> {
   await testDb.db.exec(
-    `truncate table activity_logs, tool_calls, file_changes, test_results, reviews, task_runs, tasks, agents, task_interrupts cascade;`,
+    `truncate table activity_logs, tool_calls, file_changes, test_results, reviews, task_runs, tasks, agents, task_interrupts, workflow_dependencies, workflow_nodes, workflows cascade;`,
   );
 }
 

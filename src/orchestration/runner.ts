@@ -36,6 +36,7 @@ import {
   type TaskState,
   type TestAssessment,
 } from "../domain/types.js";
+import { randomUUID } from "node:crypto";
 import { scrubSecrets, toRouterError, BudgetExceededError } from "../domain/errors.js";
 import { isTaskInterrupt, type ControlAction } from "../domain/control.js";
 import type { Logger } from "../domain/logger.js";
@@ -47,8 +48,10 @@ import {
 import type { ModelProvider } from "../providers/model-provider.js";
 import type { AgentObserver } from "../agents/agent-observer.js";
 import { TaskInterruptError } from "../domain/control.js";
+import type { RunControl } from "../domain/run-session.js";
 import { nullHooks, type OrchestratorHooks } from "./persistence-hooks.js";
 import { Workspace } from "../agents/workspace.js";
+import { buildReviewEvidence } from "../agents/evidence.js";
 
 export interface OrchestratorOptions {
   provider: ModelProvider;
@@ -56,35 +59,22 @@ export interface OrchestratorOptions {
   logger: Logger;
   createCoder(workspace: Workspace, observer: AgentObserver): Agent;
   createReviewer(workspace: Workspace, observer: AgentObserver): Agent;
-  /** Hook to create/prepare the sandbox before the first agent call. */
-  prepareWorkspace?(task: TaskSpec, workspacePath: string): Promise<void>;
+  /** Resolver to abstract the workspace creation and cleanup (V2-07). */
+  workspaceResolver: import("../infrastructure/workspace-resolver.js").WorkspaceResolver;
   /** Injectable clock for deterministic tests. */
   clock?: () => Date;
   /**
-   * Persistence/event hooks. Optional: with no hooks the orchestrator behaves
-   * exactly as before (in-memory only).
+   * Factory to create persistence/event hooks per run.
+   * Optional: with no factory the orchestrator behaves exactly as before (in-memory only).
    */
-  hooks?: OrchestratorHooks;
+  hooksFactory?: () => OrchestratorHooks;
   /**
    * Consulted before a task is allowed to become DONE. Returning a string means
    * "persistence is not trustworthy" and forces NEEDS_HUMAN instead of DONE.
    */
   completionBlocker?: () => string | undefined;
-  /**
-   * Cooperative-interrupt hook (PHASE 6), per run.
-   *
-   * Called at safe points: before an agent call, before a tool execution and
-   * before each review pass. Returning a request unwinds the run at that point.
-   * Optional, so an orchestrator without human control behaves exactly as before.
-   */
-  checkInterrupt?: () => { intent: "pause" | "cancel"; reason: string; actor?: string } | undefined;
   /** Resolves the persisted agent ids so events can reference them. */
   resolveAgentIds?: () => Promise<{ coder?: string; reviewer?: string }>;
-  /**
-   * Cancels an in-flight model/tool call. When present, an interrupt can stop a
-   * slow request instead of waiting for it to finish.
-   */
-  interruptSignal?: AbortSignal;
 }
 
 /** Stable logical agent keys, matching agents.agent_key in the database. */
@@ -103,13 +93,11 @@ export class OrchestratorService {
   private readonly logger: Logger;
   private readonly createCoder: (workspace: Workspace, observer: AgentObserver) => Agent;
   private readonly createReviewer: (workspace: Workspace, observer: AgentObserver) => Agent;
-  private readonly prepareWorkspace: (task: TaskSpec, workspacePath: string) => Promise<void>;
+  private readonly workspaceResolver: import("../infrastructure/workspace-resolver.js").WorkspaceResolver;
   private readonly clock: () => Date;
-  private readonly hooks: OrchestratorHooks;
+  private readonly hooksFactory?: () => OrchestratorHooks;
   private readonly completionBlocker?: () => string | undefined;
   private readonly resolveAgentIdsFn?: () => Promise<{ coder?: string; reviewer?: string }>;
-  /** Set per run by `run()`; read at safe points. */
-  private checkInterrupt?: () => { intent: "pause" | "cancel"; reason: string; actor?: string } | undefined;
 
   constructor(options: OrchestratorOptions) {
     this.provider = options.provider;
@@ -117,9 +105,9 @@ export class OrchestratorService {
     this.logger = options.logger;
     this.createCoder = options.createCoder;
     this.createReviewer = options.createReviewer;
-    this.prepareWorkspace = options.prepareWorkspace ?? (async () => {});
+    this.workspaceResolver = options.workspaceResolver;
     this.clock = options.clock ?? (() => new Date());
-    this.hooks = options.hooks ?? nullHooks;
+    this.hooksFactory = options.hooksFactory;
     this.completionBlocker = options.completionBlocker;
     this.resolveAgentIdsFn = options.resolveAgentIds;
   }
@@ -145,18 +133,17 @@ export class OrchestratorService {
    */
   async run(
     spec: TaskSpec,
-    options: { checkInterrupt?: () => { intent: "pause" | "cancel"; reason: string; actor?: string } | undefined } = {},
+    control: RunControl = {},
   ): Promise<TaskRecord> {
-    this.checkInterrupt = options.checkInterrupt;
-    return this.execute(spec);
+    return this.execute(spec, control);
   }
 
   /**
    * Raises the cooperative interrupt if a human asked for one, and aborts if
    * token or turn budgets have been exceeded.
    */
-  private assertProceed(record: TaskRecord, log: Logger): void {
-    const request = this.checkInterrupt?.();
+  private assertProceed(record: TaskRecord, log: Logger, control: RunControl): void {
+    const request = control.checkInterrupt?.();
     if (request) throw new TaskInterruptError(request);
     
     const budgetExceededReason = this.checkBudgets(record, log);
@@ -166,9 +153,10 @@ export class OrchestratorService {
   }
 
   /** The run itself. See the class header for the state flow. */
-  private async execute(spec: TaskSpec): Promise<TaskRecord> {
-    const workspacePath = workspacePathFor(this.config.orchestrator.workspaceRoot, spec);
+  private async execute(spec: TaskSpec, control: RunControl): Promise<TaskRecord> {
+    const workspacePath = await this.workspaceResolver.resolve(spec);
     const workspace = new Workspace(workspacePath, { createIfNotExists: !spec.workspacePath });
+    const hooks = this.hooksFactory?.() ?? nullHooks;
 
     const record: TaskRecord = {
       id: spec.id,
@@ -188,24 +176,34 @@ export class OrchestratorService {
     log.info("run.start", { title: spec.title, maxReviewCycles: this.config.orchestrator.maxReviewCycles });
 
     try {
-      await this.prepareWorkspace(spec, workspacePath);
+
+      const agentIds = await this.resolveAgentIds();
 
       // Persistence is notified before any agent runs so the task row and run
       // row exist before events reference them.
-      await this.hooks.onTaskCreated?.({
+      await hooks.onTaskCreated?.({
         spec,
         workspacePath,
         maxReviewCycles: this.config.orchestrator.maxReviewCycles,
         agentKeys: { coder: CODER_AGENT_KEY, reviewer: REVIEWER_AGENT_KEY },
-        agentIds: await this.resolveAgentIds(),
+        agentIds,
       });
 
-      const coderObserver = this.hooks.createObserver({
+      const session: import("../domain/run-session.js").RunSession = {
+        taskRunId: randomUUID(),
+        taskId: spec.id,
+        task: spec,
+        control,
+        agentKeys: { coder: CODER_AGENT_KEY, reviewer: REVIEWER_AGENT_KEY },
+        agentIds,
+      };
+
+      const coderObserver = hooks.createObserver({
         agentKey: CODER_AGENT_KEY,
         role: "coder",
         taskId: spec.id,
       });
-      const reviewerObserver = this.hooks.createObserver({
+      const reviewerObserver = hooks.createObserver({
         agentKey: REVIEWER_AGENT_KEY,
         role: "reviewer",
         taskId: spec.id,
@@ -214,15 +212,15 @@ export class OrchestratorService {
       const coder = this.createCoder(workspace, coderObserver);
       const reviewer = this.createReviewer(workspace, reviewerObserver);
 
-      const checkpoint = await this.hooks.loadCheckpoint?.(spec.id);
+      const checkpoint = await hooks.loadCheckpoint?.(spec.id);
       const resumedPhase = checkpoint?.phase;
       const resumedMetadata = checkpoint?.metadata as any;
       let currentCycle = resumedMetadata?.cycle ?? 1;
 
       // ---- PENDING -> CODING ----
-      this.assertProceed(record, log);
-      await this.transition(record, "CODING", log);
-      await this.hooks.onCheckpoint?.({
+      this.assertProceed(record, log, control);
+      await this.transition(record, "CODING", log, hooks);
+      await hooks.onCheckpoint?.({
         phase: "CODING",
         metadata: { cycle: currentCycle },
       });
@@ -231,21 +229,23 @@ export class OrchestratorService {
         record,
         agent: coder,
         workspace,
+        session,
         cycle: currentCycle,
         reason: "INITIAL",
         task: spec,
         log,
+        control,
       });
       record.cycles.push({ cycle: currentCycle, coder: coderOutput });
 
       if (this.isInfrastructureFailure(coderOutput)) {
         await this.stopByPolicy(record, "CODER_UNAVAILABLE", log, [
           `Coder produced no usable output: ${coderOutput.issues.join("; ") || coderOutput.summary}`,
-        ]);
-        return await this.finish(record, log);
+        ], hooks);
+        return await this.finish(record, log, hooks);
       }
-      await this.transition(record, "TESTING", log);
-      await this.hooks.onCheckpoint?.({
+      await this.transition(record, "TESTING", log, hooks);
+      await hooks.onCheckpoint?.({
         phase: "TESTING",
         metadata: { cycle: currentCycle, coderTokens: coderOutput.usage?.totalTokens },
       });
@@ -261,20 +261,20 @@ export class OrchestratorService {
         if (budget.stop) {
           await this.stopByPolicy(record, budget.reason ?? "MAX_REVIEW_CYCLES", log, [
             `Review budget exhausted after ${record.reviewCycles} pass(es) without approval.`,
-          ]);
+          ], hooks);
           break;
         }
 
         // Cooperative stop: the reviewer doesn't loop, but check it before
         // the single large chunk of work (and inside if it iterates).
-        this.assertProceed(record, log);
+        this.assertProceed(record, log, control);
 
         // TESTING -> REVIEW
-        await this.hooks.onSubmittedForReview?.({ cycle: currentCycle + 1, coder: coderOutput });
-        await this.transition(record, "REVIEW", log);
+        await hooks.onSubmittedForReview?.({ cycle: currentCycle + 1, coder: coderOutput });
+        await this.transition(record, "REVIEW", log, hooks);
         currentCycle = record.reviewCycles + 1;
         record.reviewCycles = currentCycle;
-        await this.hooks.onCheckpoint?.({
+        await hooks.onCheckpoint?.({
           phase: "REVIEW",
           metadata: { cycle: currentCycle },
         });
@@ -282,27 +282,29 @@ export class OrchestratorService {
         const cycle = this.ensureCycle(record, currentCycle);
         cycle.coder = coderOutput;
 
-        const reviewerOutput = await this.runReviewer({
+        let reviewerOutput = await this.runReviewer({
           record,
           agent: reviewer,
           workspace,
+          session,
           cycle: currentCycle,
           task: spec,
           coderOutput,
           log,
+          control,
         });
         cycle.reviewer = reviewerOutput;
 
         if (this.isInfrastructureFailure(reviewerOutput)) {
           await this.stopByPolicy(record, "REVIEWER_UNAVAILABLE", log, [
             `Reviewer produced no usable verdict: ${reviewerOutput.error ?? reviewerOutput.summary}`,
-          ]);
+          ], hooks);
           break;
         }
 
         // The review is recorded before the verdict is acted on, so a review can
         // never exist in the event stream without its row.
-        await this.hooks.onReviewFinished?.({ cycle: currentCycle, reviewer: reviewerOutput });
+        await hooks.onReviewFinished?.({ cycle: currentCycle, reviewer: reviewerOutput });
 
         if (reviewerOutput.verdict === "APPROVED") {
           // Persistence must be trustworthy before DONE is claimed.
@@ -312,25 +314,25 @@ export class OrchestratorService {
             record.notes.push(`Persistence unhealthy: ${blocker}`);
             await this.stopByPolicy(record, "INVALID_AGENT_OUTPUT", log, [
               `Task was approved by the reviewer but could not be marked DONE: ${blocker}`,
-            ]);
+            ], hooks);
             break;
           }
 
-          await this.hooks.onApproved?.({ cycle: currentCycle, reviewer: reviewerOutput });
-          await this.transition(record, "APPROVED", log);
+          await hooks.onApproved?.({ cycle: currentCycle, reviewer: reviewerOutput });
+          await this.transition(record, "APPROVED", log, hooks);
           record.approved = true;
-          await this.transition(record, "DONE", log);
+          await this.transition(record, "DONE", log, hooks);
           log.info("run.approved", { cycles: record.reviewCycles });
           break;
         }
 
         // ---- rejected ----
-        await this.transition(record, "REJECTED", log);
+        await this.transition(record, "REJECTED", log, hooks);
 
         const remaining = reviewBudgetDecision(record.reviewCycles, {
           maxReviewCycles: this.config.orchestrator.maxReviewCycles,
         });
-        await this.hooks.onReviewRejected?.({
+        await hooks.onReviewRejected?.({
           cycle: currentCycle,
           reviewer: reviewerOutput,
           willRetry: !remaining.stop,
@@ -339,18 +341,18 @@ export class OrchestratorService {
         if (remaining.stop) {
           await this.stopByPolicy(record, remaining.reason ?? "MAX_REVIEW_CYCLES", log, [
             `Rejected on the final permitted review pass (severity ${reviewerOutput.severity}).`,
-          ]);
+          ], hooks);
           break;
         }
 
-        await this.transition(record, "FIXING", log);
-        await this.hooks.onFixStarted?.({
+        await this.transition(record, "FIXING", log, hooks);
+        await hooks.onFixStarted?.({
           cycle: currentCycle + 1,
           requiredFixes: reviewerOutput.required_fixes,
         });
 
         const nextCycle = currentCycle + 1;
-        await this.hooks.onCheckpoint?.({
+        await hooks.onCheckpoint?.({
           phase: "FIXING",
           metadata: { cycle: nextCycle, reviewerSeverity: reviewerOutput.severity },
         });
@@ -359,21 +361,23 @@ export class OrchestratorService {
           record,
           agent: coder,
           workspace,
+          session,
           cycle: nextCycle,
           reason: "FIX",
           task: spec,
           previousReview: reviewerOutput,
           log,
+          control,
         });
 
         if (this.isInfrastructureFailure(coderOutput)) {
           await this.stopByPolicy(record, "CODER_UNAVAILABLE", log, [
             `Coder produced no usable output while fixing cycle ${currentCycle}.`,
-          ]);
+          ], hooks);
           break;
         }
 
-        await this.transition(record, "TESTING", log);
+        await this.transition(record, "TESTING", log, hooks);
         this.assessTesting(record, nextCycle, coderOutput, log);
       }
     } catch (error) {
@@ -388,7 +392,7 @@ export class OrchestratorService {
         // Close the run row before unwinding. Without this the row stays RUNNING
         // and stale detection would later report a run that was deliberately
         // stopped as abandoned.
-        await this.hooks.onAborted?.({
+        await hooks.onAborted?.({
           intent: error.request.intent,
           reason: error.request.reason,
         });
@@ -405,12 +409,17 @@ export class OrchestratorService {
       }
       
       if (record.state !== "DONE" && record.state !== "NEEDS_HUMAN") {
-        await this.stopByPolicy(record, reason, log, [message]);
+        await this.stopByPolicy(record, reason, log, [message], hooks);
       }
-      await this.hooks.onFailed?.({ stopReason: reason, message });
+      await hooks.onFailed?.({ stopReason: reason, message });
+    } finally {
+      // V2-07: GUARANTEED CLEANUP. Executes on success, error, TaskInterruptError (Pause/Cancel)
+      await this.workspaceResolver.cleanup(spec, workspacePath).catch(err => {
+        log.error("workspace.cleanup_failed", { error: err instanceof Error ? err.message : String(err) });
+      });
     }
 
-    return await this.finish(record, log);
+    return await this.finish(record, log, hooks);
   }
 
   // -------------------------------------------------------------------------
@@ -421,19 +430,22 @@ export class OrchestratorService {
     record: TaskRecord;
     agent: Agent;
     workspace: Workspace;
+    session: import("../domain/run-session.js").RunSession;
     cycle: number;
     reason: "INITIAL" | "FIX";
     task: TaskSpec;
     previousReview?: ReviewerOutput;
     log: Logger;
+    control: RunControl;
   }): Promise<CoderOutput> {
-    const { record, agent, workspace, cycle, reason, task, previousReview, log } = params;
+    const { record, agent, workspace, session, cycle, reason, task, previousReview, log, control } = params;
     const maxAttempts = this.config.orchestrator.maxAgentAttempts;
     let lastOutput: CoderOutput | undefined;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const input: AgentInput = {
         task,
+        session,
         workspacePath: workspace.root,
         cycle,
         attempt,
@@ -441,7 +453,7 @@ export class OrchestratorService {
         ...(previousReview ? { previousReview } : {}),
         // Cooperative stop: the coder checks this between turns and before each
         // tool call, so a pause never leaves a tool call in flight.
-        ...(this.checkInterrupt ? { guard: () => this.assertProceed(record, log) } : {}),
+        ...(control.checkInterrupt ? { guard: () => this.assertProceed(record, log, control) } : {}),
       };
 
       const startedAt = Date.now();
@@ -507,25 +519,44 @@ export class OrchestratorService {
     record: TaskRecord;
     agent: Agent;
     workspace: Workspace;
+    session: import("../domain/run-session.js").RunSession;
     cycle: number;
     task: TaskSpec;
     coderOutput: CoderOutput;
     log: Logger;
+    control: RunControl;
   }): Promise<ReviewerOutput> {
-    const { record, agent, workspace, cycle, task, coderOutput, log } = params;
+    const { record, agent, workspace, session, cycle, task, coderOutput, log, control } = params;
     const maxAttempts = this.config.orchestrator.maxAgentAttempts;
     let lastOutput: ReviewerOutput | undefined;
+
+    // Executions can arrive either as a first-class input field (orchestrator)
+    // or attached to the coder contract.
+    const executions = coderOutput.executed_commands;
+
+    const cycleRecord = this.ensureCycle(record, cycle);
+    const testAssessment = cycleRecord.testing!;
+
+    const reviewEvidence = await buildReviewEvidence({
+      workspace,
+      task,
+      extraPaths: coderOutput.files_changed,
+      executed: executions,
+      testAssessment,
+    });
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const input: AgentInput = {
         task,
+        session,
         workspacePath: workspace.root,
         cycle,
         attempt,
         reason: cycle > 1 ? "FIX" : "INITIAL",
         previousCoder: coderOutput,
-        ...(coderOutput.executed_commands ? { previousExecutions: coderOutput.executed_commands } : {}),
-        ...(this.checkInterrupt ? { guard: () => this.assertProceed(record, log) } : {}),
+        reviewEvidence,
+        ...(executions ? { previousExecutions: executions } : {}),
+        ...(control.checkInterrupt ? { guard: () => this.assertProceed(record, log, control) } : {}),
       };
 
       const startedAt = Date.now();
@@ -687,7 +718,7 @@ export class OrchestratorService {
   // Bookkeeping helpers
   // -------------------------------------------------------------------------
 
-  private async transition(record: TaskRecord, to: TaskState, log: Logger): Promise<void> {
+  private async transition(record: TaskRecord, to: TaskState, log: Logger, hooks: OrchestratorHooks): Promise<void> {
     assertTransition(record.state, to);
     const from = record.state;
     record.state = to;
@@ -695,7 +726,7 @@ export class OrchestratorService {
     log.info("state.transition", { from, to, reviewCycles: record.reviewCycles });
 
     // Persist + publish. Ordering matters for the event stream, so it is awaited.
-    await this.hooks.onStateChanged?.({ from, to, cycle: record.reviewCycles });
+    await hooks.onStateChanged?.({ from, to, cycle: record.reviewCycles });
   }
 
   /** Records a terminal state reached by policy, not by a state-machine edge. */
@@ -704,11 +735,12 @@ export class OrchestratorService {
     reason: StopReason,
     log: Logger,
     notes: string[],
+    hooks: OrchestratorHooks,
   ): Promise<void> {
     const from = record.state;
-    const terminal = reachableTerminal(from);
+    const terminal = reachableTerminal(from, reason);
     this.stop(record, reason, log, notes);
-    await this.hooks.onStateChanged?.({
+    await hooks.onStateChanged?.({
       from,
       to: terminal ?? record.state,
       cycle: record.reviewCycles,
@@ -719,7 +751,7 @@ export class OrchestratorService {
 
   /** Records a terminal state reached by policy rather than by an edge. */
   private stop(record: TaskRecord, reason: StopReason, log: Logger, notes: string[]): void {
-    const terminal = reachableTerminal(record.state);
+    const terminal = reachableTerminal(record.state, reason);
     if (!terminal) {
       throw new Error(
         `Cannot stop: state ${record.state} has no terminal state (already terminal?)`,
@@ -771,7 +803,7 @@ export class OrchestratorService {
     return entry;
   }
 
-  private async finish(record: TaskRecord, log: Logger): Promise<TaskRecord> {
+  private async finish(record: TaskRecord, log: Logger, hooks: OrchestratorHooks): Promise<TaskRecord> {
     record.finishedAt = this.nowIso();
     const coderCalls = record.attempts.filter((a) => a.kind === "CODER").length;
     const reviewerCalls = record.attempts.filter((a) => a.kind === "REVIEWER").length;
@@ -786,7 +818,7 @@ export class OrchestratorService {
       reviewerCalls,
     });
 
-    await this.hooks.onCompleted?.({
+    await hooks.onCompleted?.({
       state: record.state,
       approved: record.approved,
       reviewCycles: record.reviewCycles,

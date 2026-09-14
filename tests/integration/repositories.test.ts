@@ -44,6 +44,10 @@ describe("schema + migrations", () => {
       "file_changes",
       "test_results",
       "schema_migrations",
+      // Phase V2-04: Workflow DAG tables
+      "workflows",
+      "workflow_nodes",
+      "workflow_dependencies",
     ]) {
       expect(tables, `missing table ${expected}`).toContain(expected);
     }

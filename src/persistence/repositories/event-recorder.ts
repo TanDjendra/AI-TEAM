@@ -48,6 +48,8 @@ export interface RecorderRepositories {
   testResults: TestResultRepository;
   /** PHASE 6: cooperative pause/cancel requests. */
   interrupts: InterruptRepository;
+  workflows: import("../../domain/workflow.js").WorkflowRepository;
+  workflowDependencies: import("../../domain/workflow.js").WorkflowDependencyRepository;
 }
 
 /**

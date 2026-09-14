@@ -343,6 +343,8 @@ function attachRecorder(bus: EventBus, options: { onFatal?: (m: string) => void 
       fileChanges: testDb.fileChanges,
       testResults: testDb.testResults,
       interrupts: testDb.interrupts,
+      workflows: testDb.workflows,
+      workflowDependencies: testDb.workflowDependencies,
     },
     logger,
     ...(options.onFatal ? { onFailure: (f) => f.fatal && options.onFatal!(f.message) } : {}),

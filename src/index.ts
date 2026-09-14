@@ -9,6 +9,8 @@
 export * from "./domain/types.js";
 export * from "./domain/task-machine.js";
 export * from "./domain/errors.js";
+export * from "./domain/run-session.js";
+export * from "./domain/review-evidence.js";
 export {
   createLogger,
   silentLogger,
@@ -79,11 +81,8 @@ export {
 export { CoderAgent, type CoderAgentOptions } from "./agents/coder-agent.js";
 export { ReviewerAgent, type ReviewerAgentOptions } from "./agents/reviewer-agent.js";
 export {
-  buildTaskEvidence,
+  buildReviewEvidence,
   renderEvidence,
-  type TaskEvidence,
-  type EvidenceFile,
-  type CommandEvidence,
 } from "./agents/evidence.js";
 export {
   extractJsonObject,

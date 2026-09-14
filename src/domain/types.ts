@@ -27,12 +27,13 @@ export const TASK_STATES = [
   "APPROVED",
   "DONE",
   "NEEDS_HUMAN",
+  "PAUSED",
 ] as const;
 
 export type TaskState = (typeof TASK_STATES)[number];
 
 /** Terminal states end the pipeline. Everything else must have an outgoing edge. */
-export const TERMINAL_STATES: readonly TaskState[] = ["DONE", "NEEDS_HUMAN"];
+export const TERMINAL_STATES: readonly TaskState[] = ["DONE", "NEEDS_HUMAN", "PAUSED"];
 
 /** A stopping decision produced by the orchestrator's policy layer. */
 export type StopReason =
@@ -142,12 +143,17 @@ export interface Agent {
   execute(input: AgentInput): Promise<AgentOutput>;
 }
 
+import type { ReviewEvidence } from "./review-evidence.js";
+import type { RunSession } from "./run-session.js";
+
 /**
  * Everything an agent needs to run. The orchestrator owns this object; agents
  * never read process.env or global state for routing decisions.
  */
 export interface AgentInput {
   task: TaskSpec;
+  /** The immutable run session containing execution state */
+  session: RunSession;
   /** Absolute sandbox path. Read-only for the reviewer. */
   workspacePath: string;
   /** Absolute path of the agent's own scratch/log directory. */
@@ -160,6 +166,8 @@ export interface AgentInput {
   previousCoder?: CoderOutput;
   /** Harness-verified command executions from the coder run in this cycle. */
   previousExecutions?: readonly CommandRunEvidence[];
+  /** Pure text evidence provided to the reviewer. */
+  reviewEvidence?: ReviewEvidence;
   /** 1-based coder attempt number inside the cycle. */
   attempt?: number;
   /** Human-readable reason the agent was invoked (e.g. "INITIAL" | "FIX"). */
@@ -267,3 +275,34 @@ export interface AgentResult<T extends AgentOutput = AgentOutput> {
   output: T;
   attempts: AgentAttempt[];
 }
+
+// ---------------------------------------------------------------------------
+// Profiles (Phase V2-02)
+// ---------------------------------------------------------------------------
+
+export interface ProviderConfig {
+  readonly id: string;
+  readonly defaultBaseUrl: string;
+  readonly requiresApiKey: boolean;
+  readonly defaultTimeoutMs?: number;
+}
+
+export interface ModelProfile {
+  readonly id: string;
+  readonly providerId: string;
+  readonly contextWindow: number;
+  readonly maxOutputTokens?: number;
+  readonly costPer1kTokens?: number;
+  readonly features: {
+    readonly supportsToolCalling: boolean;
+    readonly supportsVision?: boolean;
+  };
+}
+
+export interface AgentProfile {
+  readonly role: "coder" | "reviewer" | "planner";
+  readonly defaultModelId: string;
+  readonly systemPromptTemplate: string;
+  readonly allowedTools?: readonly string[];
+}
+

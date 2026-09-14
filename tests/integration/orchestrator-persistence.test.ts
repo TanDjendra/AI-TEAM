@@ -247,10 +247,15 @@ async function runE2E(options: {
         observer,
         false,
       ),
-    prepareWorkspace: async (_task, dir) => {
-      await mkdir(dir, { recursive: true });
+    workspaceResolver: {
+      resolve: async (task) => {
+        const dir = join(workspaceRoot, task.workspaceSlug ?? task.id);
+        await mkdir(dir, { recursive: true });
+        return dir;
+      },
+      cleanup: async () => {}
     },
-    hooks,
+    hooksFactory: () => hooks,
     resolveAgentIds: async () => persistence.agentIds,
     ...(options.completionBlocker ? { completionBlocker: options.completionBlocker } : {}),
   });

@@ -42,6 +42,21 @@ export const TASK_EVENT_TYPES = [
   "HUMAN_CANCELLED_TASK",
   "HUMAN_RETRIED_TASK",
   "HUMAN_APPROVED_TASK",
+  // Phase V2-04: Workflow DAG events
+  "WORKFLOW_CREATED",
+  "WORKFLOW_VALIDATED",
+  "WORKFLOW_VALIDATION_FAILED",
+  "WORKFLOW_STARTED",
+  "WORKFLOW_SUCCEEDED",
+  "WORKFLOW_FAILED",
+  "WORKFLOW_CANCELLED",
+  // Node lifecycle events
+  "WORKFLOW_NODE_READY",
+  "WORKFLOW_NODE_CLAIMED",
+  "WORKFLOW_NODE_RUNNING",
+  "WORKFLOW_NODE_SUCCEEDED",
+  "WORKFLOW_NODE_BLOCKED",
+  "WORKFLOW_NODE_CANCELLED",
 ] as const;
 
 export type TaskEventType = (typeof TASK_EVENT_TYPES)[number];
@@ -237,6 +252,96 @@ export interface TaskEventPayloadMap {
      */
     reviewerVerdict?: string;
   };
+
+  // ── Phase V2-04: Workflow DAG events ────────────────────────────────────
+
+  /** WorkflowSpec persisted; status = DRAFT. */
+  WORKFLOW_CREATED: {
+    workflowId: string;
+    objective: string;
+    nodeCount: number;
+    edgeCount: number;
+    workspaceSlug?: string;
+    workspacePath?: string;
+  };
+
+  /** WorkflowValidator passed; status → VALIDATED. */
+  WORKFLOW_VALIDATED: {
+    workflowId: string;
+  };
+
+  /** WorkflowValidator rejected the spec. */
+  WORKFLOW_VALIDATION_FAILED: {
+    workflowId: string;
+    errors: Array<{ code: string; message: string; nodes?: string[] }>;
+  };
+
+  /** First node transitioned to CLAIMED or RUNNING. */
+  WORKFLOW_STARTED: {
+    workflowId: string;
+  };
+
+  /** All nodes reached SUCCEEDED. */
+  WORKFLOW_SUCCEEDED: {
+    workflowId: string;
+    durationMs: number;
+  };
+
+  /** One or more nodes became permanently BLOCKED. */
+  WORKFLOW_FAILED: {
+    workflowId: string;
+    blockedNodeKeys: string[];
+    reason: string;
+  };
+
+  /** Human-cancelled the whole workflow. */
+  WORKFLOW_CANCELLED: {
+    workflowId: string;
+    reason: string;
+  };
+
+  // ── Node lifecycle events ────────────────────────────────────────────────
+
+  /** All predecessor nodes SUCCEEDED; node transitions WAITING_DEPENDENCIES → READY. */
+  WORKFLOW_NODE_READY: {
+    workflowId: string;
+    nodeKey: string;
+  };
+
+  /** Scheduler reserved the node; V1 tasks row materialised. */
+  WORKFLOW_NODE_CLAIMED: {
+    workflowId: string;
+    nodeKey: string;
+    taskId: string;
+  };
+
+  /** Associated V1 task entered a running state. */
+  WORKFLOW_NODE_RUNNING: {
+    workflowId: string;
+    nodeKey: string;
+    taskId: string;
+  };
+
+  /** V1 task completed (DONE + approved = true). */
+  WORKFLOW_NODE_SUCCEEDED: {
+    workflowId: string;
+    nodeKey: string;
+    taskId: string;
+  };
+
+  /** A predecessor node was CANCELLED or BLOCKED (poison-pill propagation). */
+  WORKFLOW_NODE_BLOCKED: {
+    workflowId: string;
+    nodeKey: string;
+    reason: string;
+  };
+
+  /** Node explicitly cancelled before or during execution. */
+  WORKFLOW_NODE_CANCELLED: {
+    workflowId: string;
+    nodeKey: string;
+    reason: string;
+  };
 }
 
 /** Shared shape for every human-originated event. */
@@ -262,6 +367,12 @@ export interface EventContext {
   taskId: string;
   agentId?: string;
   cycle?: number;
+  /**
+   * Phase V2-04: present on workflow-level events.
+   * Distinct from taskId — overloading taskId with a workflowId breaks
+   * downstream telemetry that assumes taskId references the tasks table.
+   */
+  workflowId?: string;
 }
 
 /**

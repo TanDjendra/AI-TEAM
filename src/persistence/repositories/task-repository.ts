@@ -234,8 +234,6 @@ export class PostgresTaskRepository extends Repository implements TaskRepository
   async createAuto(input: Omit<CreateTaskInput, "externalId">): Promise<TaskRecord> {
     return withDbRetry(async () =>
       this.run(async (tx) => {
-        // Use an advisory lock to serialize auto-ID allocation globally
-        await tx.query("SELECT pg_advisory_xact_lock(7456)");
         const rows = await tx.query(
           `
           WITH next_id AS (

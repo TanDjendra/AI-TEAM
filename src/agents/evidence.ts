@@ -8,78 +8,39 @@
  */
 
 import { truncate } from "../domain/errors.js";
-import type { CoderOutput, TaskSpec } from "../domain/types.js";
+import type { CoderOutput, TaskSpec, TestAssessment } from "../domain/types.js";
+import type { ReviewEvidence, EvidenceFile, CommandEvidence } from "../domain/review-evidence.js";
 import type { Workspace } from "./workspace.js";
-
-export interface EvidenceFile {
-  path: string;
-  bytes: number;
-  excerpt: string;
-  truncated: boolean;
-}
-
-export interface CommandEvidence {
-  command: string;
-  /** Actual process exit code, or null when the process never started. */
-  exitCode: number | null;
-  passed: boolean;
-  timedOut: boolean;
-  note: string;
-  output: string;
-}
-
-export interface TaskEvidence {
-  task: TaskSpec;
-  cycle: number;
-  attemptCount: number;
-  coderStatus: string;
-  coderSummary: string;
-  coderIssues: string[];
-  /** Files the harness verified were written — authoritative. */
-  files: EvidenceFile[];
-  /** Commands the harness verified were executed — authoritative. */
-  commands: CommandEvidence[];
-  testsPassed: boolean;
-  testCommands: string[];
-  /** Points the reviewer must check but that the harness cannot verify. */
-  unverifiable: string[];
-}
 
 export interface BuildEvidenceOptions {
   workspace: Workspace;
   task: TaskSpec;
-  cycle: number;
-  attemptCount: number;
-  coder: CoderOutput;
   /** Paths to include in full, e.g. every path in coder.files_changed. */
   extraPaths?: string[];
   /** Verified command executions recorded by the coder harness. */
   executed?: ReadonlyArray<{ command: string; exitCode: number | null; timedOut: boolean; output: string }>;
+  testAssessment: TestAssessment;
   excerptChars?: number;
   maxFiles?: number;
 }
 
-export async function buildTaskEvidence(options: BuildEvidenceOptions): Promise<TaskEvidence> {
+export async function buildReviewEvidence(options: BuildEvidenceOptions): Promise<ReviewEvidence> {
   const {
     workspace,
     task,
-    cycle,
-    attemptCount,
-    coder,
     extraPaths = [],
     executed = [],
+    testAssessment,
     excerptChars = 2_600,
     maxFiles = 25,
   } = options;
 
-  const wanted = new Set<string>([...coder.files_changed, ...extraPaths].map(normalise));
+  const wanted = new Set<string>(extraPaths.map(normalise));
 
   const files: EvidenceFile[] = [];
   const all = await workspace.listFiles({ maxFiles: 5_000 });
   const wantedList = all.filter((entry) => wanted.has(entry.path));
 
-  // Optimization: Only include files that were changed or explicitly requested.
-  // Don't pollute the reviewer context with unmodified files unless requested.
   for (const entry of wantedList) {
     try {
       const content = await workspace.readText(entry.path, excerptChars + 1);
@@ -108,39 +69,31 @@ export async function buildTaskEvidence(options: BuildEvidenceOptions): Promise<
     output: truncate(entry.output, 1_800),
   }));
 
-  const testCommands = coder.tests_run.slice();
-
-  // The honest list of things no harness can prove.
-  const unverifiable: string[] = [];
+  const verifierLimits: string[] = [];
   if (commands.length === 0) {
-    unverifiable.push(
+    verifierLimits.push(
       "No command execution was recorded for this run, so the reviewer cannot confirm the tests were ever run.",
     );
   }
-  if (coder.tests_passed && !commands.some((c) => c.passed)) {
-    unverifiable.push(
-      "The coder reports tests_passed=true but no recorded command exited 0.",
+  if (testAssessment.testsExecuted && !commands.some((c) => c.passed)) {
+    verifierLimits.push(
+      "The coder reports tests passed but no recorded command exited 0.",
     );
   }
-  unverifiable.push(
+  verifierLimits.push(
     "Command output shown is truncated; treat long logs as partial evidence.",
   );
-  unverifiable.push(
+  verifierLimits.push(
     "Behaviour that no recorded command exercises (UX, runtime-only paths, external services) cannot be verified from this evidence.",
   );
 
   return {
+    schemaVersion: 1,
     task,
-    cycle,
-    attemptCount,
-    coderStatus: coder.status,
-    coderSummary: coder.summary,
-    coderIssues: coder.issues.slice(),
-    files,
-    commands,
-    testsPassed: coder.tests_passed,
-    testCommands,
-    unverifiable,
+    verifiedFiles: files,
+    verifiedCommands: commands,
+    testAssessment,
+    verifierLimits,
   };
 }
 
@@ -149,13 +102,13 @@ function normalise(path: string): string {
 }
 
 /** Renders evidence for the reviewer prompt. */
-export function renderEvidence(evidence: TaskEvidence): string {
+export function renderEvidence(evidence: ReviewEvidence, coder?: CoderOutput, cycle: number = 1, attemptCount: number = 1): string {
   const { task } = evidence;
   const lines: string[] = [
     `TASK ID: ${task.id}`,
     `TITLE: ${task.title}`,
-    `REVIEW CYCLE: ${evidence.cycle}`,
-    `CODER ATTEMPTS: ${evidence.attemptCount}`,
+    `REVIEW CYCLE: ${cycle}`,
+    `CODER ATTEMPTS: ${attemptCount}`,
     "",
     "TASK DESCRIPTION:",
     task.description.trim(),
@@ -166,24 +119,28 @@ export function renderEvidence(evidence: TaskEvidence): string {
     for (const criterion of task.acceptanceCriteria) lines.push(`- ${criterion}`);
   }
 
-  lines.push(
-    "",
-    "CODER REPORT (self-reported, NOT trusted — verify against the harness record below):",
-    `  status: ${evidence.coderStatus}`,
-    `  tests_passed (self-reported): ${String(evidence.testsPassed)}`,
-    `  test commands (self-reported): ${evidence.testCommands.length ? evidence.testCommands.join(" | ") : "(none)"}`,
-    `  summary: ${evidence.coderSummary}`,
-  );
-  if (evidence.coderIssues.length) {
-    lines.push("  declared issues:");
-    for (const issue of evidence.coderIssues) lines.push(`    - ${issue}`);
+  if (coder) {
+    lines.push(
+      "",
+      "CODER REPORT (self-reported, NOT trusted — verify against the harness record below):",
+      `  status: ${coder.status}`,
+      `  tests_passed (self-reported): ${String(coder.tests_passed)}`,
+      `  test commands (self-reported): ${coder.tests_run.length ? coder.tests_run.join(" | ") : "(none)"}`,
+      `  summary: ${coder.summary}`,
+    );
+    if (coder.issues.length) {
+      lines.push("  declared issues:");
+      for (const issue of coder.issues) lines.push(`    - ${issue}`);
+    }
+  } else {
+    lines.push("", "CODER REPORT: (no coder output was available for this cycle)");
   }
 
   lines.push("", "HARNESS-VERIFIED FILE SNAPSHOT:");
-  if (evidence.files.length === 0) {
+  if (evidence.verifiedFiles.length === 0) {
     lines.push("  (no files present in the workspace)");
   } else {
-    for (const file of evidence.files) {
+    for (const file of evidence.verifiedFiles) {
       lines.push(
         "",
         `--- FILE: ${file.path} (${file.bytes}B)${file.truncated ? " [truncated]" : ""} ---`,
@@ -193,17 +150,22 @@ export function renderEvidence(evidence: TaskEvidence): string {
   }
 
   lines.push("", "HARNESS-VERIFIED COMMAND EXECUTION LOG (actual exit codes):");
-  if (evidence.commands.length === 0) {
+  if (evidence.verifiedCommands.length === 0) {
     lines.push("  (NO COMMAND WAS EXECUTED — this is itself a serious problem)");
   } else {
-    for (const command of evidence.commands) {
+    for (const command of evidence.verifiedCommands) {
       lines.push("", `$ ${command.command}`, `  -> ${command.note}`, indent(command.output));
     }
   }
 
-  if (evidence.unverifiable.length) {
+  lines.push("", "HARNESS-VERIFIED TEST ASSESSMENT:");
+  lines.push(`  testsExecuted: ${evidence.testAssessment.testsExecuted}`);
+  lines.push(`  allCommandsPassed: ${evidence.testAssessment.allCommandsPassed}`);
+  lines.push(`  reason: ${evidence.testAssessment.reason}`);
+
+  if (evidence.verifierLimits.length) {
     lines.push("", "WHAT THE HARNESS COULD NOT VERIFY:");
-    for (const item of evidence.unverifiable) lines.push(`- ${item}`);
+    for (const item of evidence.verifierLimits) lines.push(`- ${item}`);
   }
 
   return lines.join("\n");

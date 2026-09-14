@@ -29,6 +29,7 @@ export const TASK_TRANSITIONS: Readonly<Record<TaskState, readonly TaskState[]>>
   APPROVED: ["DONE"],
   DONE: [],
   NEEDS_HUMAN: [],
+  PAUSED: [],
 };
 
 export class IllegalStateTransitionError extends Error {
@@ -76,9 +77,14 @@ const TERMINAL_REACHABILITY: Readonly<Record<TaskState, readonly TaskState[]>> =
   APPROVED: ["DONE"],
   DONE: [],
   NEEDS_HUMAN: [],
+  PAUSED: [],
 };
 
-export function reachableTerminal(from: TaskState): TaskState | undefined {
+export function reachableTerminal(from: TaskState, reason?: StopReason): TaskState | undefined {
+  if (isTerminal(from)) return undefined;
+  if (reason === "BUDGET_EXCEEDED" && from !== "APPROVED") {
+    return "PAUSED";
+  }
   return TERMINAL_REACHABILITY[from][0];
 }
 

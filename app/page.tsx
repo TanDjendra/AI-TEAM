@@ -17,6 +17,7 @@ import { RecoveryBanner } from "./components/recovery-banner.js";
 import { ReviewCenter } from "./components/review-center.js";
 import { SystemHeader } from "./components/system-header.js";
 import { TaskBoard } from "./components/task-board.js";
+import { WorkflowBoard } from "./components/workflow-board.js";
 import { ErrorState, Panel, PanelBody, PanelHeader, PanelTitle, SkeletonRows } from "./components/ui.js";
 import { useApi } from "./lib/use-api.js";
 import { useEventStream } from "./lib/use-event-stream.js";
@@ -26,11 +27,13 @@ import type {
   ReviewView,
   SystemStatusView,
   TaskView,
+  WorkflowView,
 } from "../src/dashboard/service.js";
 
 export default function CommandCenterPage() {
   const status = useApi<SystemStatusView>("/api/status");
   const tasks = useApi<TaskView[]>("/api/tasks");
+  const workflows = useApi<WorkflowView[]>("/api/workflows");
   const reviews = useApi<ReviewView[]>("/api/reviews?limit=50");
   const activity = useApi<ActivityView[]>("/api/activity?limit=100");
 
@@ -50,9 +53,10 @@ export default function CommandCenterPage() {
   const refreshAll = React.useCallback(() => {
     status.refresh();
     tasks.refresh();
+    workflows.refresh();
     reviews.refresh();
     activity.refresh();
-  }, [status, tasks, reviews, activity]);
+  }, [status, tasks, workflows, reviews, activity]);
 
   const firstEvent = React.useRef(true);
   React.useEffect(() => {
@@ -67,11 +71,12 @@ export default function CommandCenterPage() {
 
   const agents: AgentView[] = status.data?.agents ?? [];
   const taskList = tasks.data ?? [];
+  const workflowList = workflows.data ?? [];
   const databaseReady = status.data?.database.ready ?? false;
   const databaseConfigured = status.data?.database.configured ?? false;
 
   const initialLoading = status.loading && status.data === undefined;
-  const fatalError = status.error ?? tasks.error;
+  const fatalError = status.error ?? tasks.error ?? workflows.error;
 
   return (
     <div className="flex h-dvh flex-col">
@@ -156,6 +161,32 @@ export default function CommandCenterPage() {
                 ) : (
                   <div className="p-3">
                     <TaskBoard tasks={taskList} now={now} />
+                  </div>
+                )}
+              </PanelBody>
+            </Panel>
+
+            {/* ---- workflow board ---- */}
+            <Panel>
+              <PanelHeader>
+                <PanelTitle>Workflow board</PanelTitle>
+                <span className="text-[10px] text-[var(--content-faint)]">
+                  {workflowList.length} workflow(s)
+                  {workflows.loading ? " · refreshing" : ""}
+                </span>
+              </PanelHeader>
+              <PanelBody className="p-0">
+                {workflows.loading && workflows.data === undefined ? (
+                  <div className="p-4">
+                    <SkeletonRows rows={3} />
+                  </div>
+                ) : workflows.error ? (
+                  <div className="p-4">
+                    <ErrorState message="Could not load workflows." detail={workflows.error} />
+                  </div>
+                ) : (
+                  <div className="p-3">
+                    <WorkflowBoard workflows={workflowList} now={now} />
                   </div>
                 )}
               </PanelBody>

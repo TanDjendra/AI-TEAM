@@ -23,6 +23,8 @@ import {
   type DashboardRuntime,
 } from "../../src/dashboard/runtime.js";
 import { createRealtimeHub } from "../../src/dashboard/realtime.js";
+import { getAgentProfile } from "../../src/config/agent-profiles.js";
+import { getModelProfile, synthesizeModelProfile } from "../../src/config/model-profiles.js";
 import { createEventBus } from "../../src/events/bus.js";
 import type { AnyTaskEvent } from "../../src/events/types.js";
 import { createPersistence, type Persistence } from "../../src/persistence/container.js";
@@ -63,6 +65,8 @@ function buildPersistence(db: Db, bus: ReturnType<typeof createEventBus>): Persi
     fileChanges: testDb.fileChanges,
     testResults: testDb.testResults,
     interrupts: testDb.interrupts,
+    workflows: testDb.workflows,
+    workflowDependencies: testDb.workflowDependencies,
   };
 
   // The REAL recorder, not a stub: this is what proves that a control action is
@@ -102,11 +106,18 @@ async function installRuntime(
     cwd: process.cwd(),
     loadDotEnv: false,
   });
-  // The model ids must match the seeded agent rows for the assertions below.
   const configured = {
     ...config,
-    coder: { model: "grip/deepseek-v4.1-flash" },
-    reviewer: { model: "grip/gpt-5.6-luna" },
+    coder: {
+      model: "grip/deepseek-v4.1-flash",
+      agentProfile: getAgentProfile("coder"),
+      modelProfile: getModelProfile("grip/deepseek-v4.1-flash") ?? synthesizeModelProfile("grip/deepseek-v4.1-flash", 128_000),
+    },
+    reviewer: {
+      model: "grip/gpt-5.6-luna",
+      agentProfile: getAgentProfile("reviewer"),
+      modelProfile: getModelProfile("grip/gpt-5.6-luna") ?? synthesizeModelProfile("grip/gpt-5.6-luna", 128_000),
+    },
   };
   const runtime = await createDashboardRuntime({
     config: configured,

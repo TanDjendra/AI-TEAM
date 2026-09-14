@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { AppConfig } from "../../src/config/env.js";
+import { getAgentProfile } from "../../src/config/agent-profiles.js";
+import { getModelProfile, synthesizeModelProfile } from "../../src/config/model-profiles.js";
 import type {
   Agent,
   AgentInput,
@@ -49,8 +51,16 @@ export function testConfig(overrides: {
       maxRetries: 0,
       verifyOnStart: false,
     },
-    coder: { model: "grip/deepseek-v4.1-flash" },
-    reviewer: { model: "grip/gpt-5.6-luna" },
+    coder: {
+      model: "grip/deepseek-v4.1-flash",
+      agentProfile: getAgentProfile("coder"),
+      modelProfile: getModelProfile("grip/deepseek-v4.1-flash") ?? synthesizeModelProfile("grip/deepseek-v4.1-flash", 128_000),
+    },
+    reviewer: {
+      model: "grip/gpt-5.6-luna",
+      agentProfile: getAgentProfile("reviewer"),
+      modelProfile: getModelProfile("grip/gpt-5.6-luna") ?? synthesizeModelProfile("grip/gpt-5.6-luna", 128_000),
+    },
     orchestrator: {
       maxReviewCycles: overrides.maxReviewCycles ?? 3,
       maxAgentAttempts: overrides.maxAgentAttempts ?? 2,
@@ -61,6 +71,9 @@ export function testConfig(overrides: {
       contextCompactionEnabled: false,
       contextCompactionRatio: 0.75,
       modelContextWindow: 128000,
+      workflowEnabled: false,
+      gitWorkspaceEnabled: false,
+      workerPoolSize: 4,
     },
     logging: { level: "error", format: "json" },
     database: {

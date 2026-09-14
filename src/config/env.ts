@@ -12,13 +12,20 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { isLogLevel, type LogFormat, type LogLevel } from "../domain/logger.js";
+import type { AgentProfile, ModelProfile } from "../domain/types.js";
+import { getAgentProfile } from "./agent-profiles.js";
+import { getModelProfile, synthesizeModelProfile } from "./model-profiles.js";
 
 export interface CoderConfig {
   model: string;
+  agentProfile: AgentProfile;
+  modelProfile: ModelProfile;
 }
 
 export interface ReviewerConfig {
   model: string;
+  agentProfile: AgentProfile;
+  modelProfile: ModelProfile;
 }
 
 export interface RouterConfig {
@@ -54,6 +61,12 @@ export interface OrchestratorConfig {
   maxToolTurns?: number;
   /** Phase 7C: Maximum cost in standard units (or USD) per task */
   maxTaskCost?: number;
+  /** Phase V2-04: Enable Workflow/DAG subsystem (default false). */
+  workflowEnabled: boolean;
+  /** Phase V2-07: Enable Git workspace isolation (default false). */
+  gitWorkspaceEnabled: boolean;
+  /** Phase V2-08: Maximum concurrent workflow nodes dispatched by the WorkerPool (default 4). */
+  workerPoolSize: number;
   /** Phase 7C: Enable adaptive context compaction (default false) */
   contextCompactionEnabled: boolean;
   /** Phase 7C: The ratio of context window at which compaction triggers (default 0.75) */
@@ -236,9 +249,12 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   } catch {
     errors.push(`ROUTER_BASE_URL is not a valid URL (received "${baseUrl}")`);
   }
+  const explicitCoderModel = env.CODER_MODEL?.trim();
+  const explicitReviewerModel = env.REVIEWER_MODEL?.trim();
 
-  const coderModel = env.CODER_MODEL?.trim() || "";
-  const reviewerModel = env.REVIEWER_MODEL?.trim() || "";
+  const coderModel = explicitCoderModel;
+  const reviewerModel = explicitReviewerModel;
+
   if (!coderModel) errors.push("CODER_MODEL is required (e.g. grip/deepseek-v4.1-flash)");
   if (!reviewerModel) errors.push("REVIEWER_MODEL is required (e.g. grip/gpt-5.6-luna)");
   if (coderModel && reviewerModel && coderModel === reviewerModel) {
@@ -299,8 +315,14 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   if (Number.isNaN(contextCompactionRatio) || contextCompactionRatio < 0.1 || contextCompactionRatio > 0.95) {
     errors.push("CONTEXT_COMPACTION_RATIO must be a number between 0.1 and 0.95");
   }
-  const modelContextWindow = positiveInt(env.MODEL_CONTEXT_WINDOW, 128_000, "MODEL_CONTEXT_WINDOW", errors, { min: 4096 });
-  
+  const baseContextWindow = positiveInt(env.MODEL_CONTEXT_WINDOW, 128_000, "MODEL_CONTEXT_WINDOW", errors, { min: 4096 });
+  const modelContextWindow = baseContextWindow; // Keep this for OrchestratorConfig compatibility
+
+  const workerPoolSize = positiveInt(env.WORKER_POOL_SIZE, 4, "WORKER_POOL_SIZE", errors, {
+    min: 1,
+    max: 16,
+  });
+
   const verifyOnStart = bool(env.ROUTER_VERIFY_ON_START, false);
 
   if (errors.length > 0) {
@@ -319,8 +341,16 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
       maxRetries,
       verifyOnStart,
     },
-    coder: { model: coderModel },
-    reviewer: { model: reviewerModel },
+    coder: {
+      model: coderModel as string,
+      agentProfile: getAgentProfile("coder"),
+      modelProfile: getModelProfile(coderModel as string) ?? synthesizeModelProfile(coderModel as string, baseContextWindow),
+    },
+    reviewer: {
+      model: reviewerModel as string,
+      agentProfile: getAgentProfile("reviewer"),
+      modelProfile: getModelProfile(reviewerModel as string) ?? synthesizeModelProfile(reviewerModel as string, baseContextWindow),
+    },
     orchestrator: {
       maxReviewCycles,
       maxAgentAttempts,
@@ -356,6 +386,9 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
       contextCompactionEnabled,
       contextCompactionRatio,
       modelContextWindow,
+      workflowEnabled: bool(env.WORKFLOW_ENABLED, false),
+      gitWorkspaceEnabled: bool(env.GIT_WORKSPACE_ENABLED, false),
+      workerPoolSize,
     },
     logging: {
       level: (isLogLevel(logLevel) ? logLevel : "info") as LogLevel,
@@ -390,6 +423,7 @@ export function describeConfig(config: AppConfig): Record<string, string | numbe
     "orchestrator.maxAgentAttempts": config.orchestrator.maxAgentAttempts,
     "orchestrator.staleRunThresholdMs": config.orchestrator.staleRunThresholdMs,
     "orchestrator.heartbeatIntervalMs": config.orchestrator.heartbeatIntervalMs,
+    "orchestrator.workerPoolSize": config.orchestrator.workerPoolSize,
     "orchestrator.staleSweepIntervalMs": config.orchestrator.staleSweepIntervalMs,
     "orchestrator.workspaceRoot": config.orchestrator.workspaceRoot,
     "logging.level": config.logging.level,

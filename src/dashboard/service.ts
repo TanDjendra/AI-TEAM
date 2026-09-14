@@ -32,6 +32,7 @@ import type { RunRecord } from "../persistence/repositories/run-repository.js";
 import type { TaskRecord } from "../persistence/repositories/task-repository.js";
 import type { TestResultRecord } from "../persistence/repositories/test-result-repository.js";
 import type { ToolCallRecord } from "../persistence/repositories/tool-call-repository.js";
+import type { WorkflowRecord, WorkflowNodeRecord } from "../domain/workflow.js";
 
 // ---------------------------------------------------------------------------
 // View models
@@ -109,6 +110,9 @@ export interface TaskDetailView {
   tests: TestView[];
   activity: ActivityView[];
 }
+
+export type WorkflowView = WorkflowRecord;
+export type WorkflowNodeView = WorkflowNodeRecord;
 
 export interface RunView {
   id: string;
@@ -233,6 +237,12 @@ export interface DashboardService {
   listActivity(options?: { limit?: number; taskId?: string }): Promise<ActivityView[]>;
   listReviews(options?: { limit?: number; taskId?: string }): Promise<ReviewView[]>;
   systemStatus(): Promise<SystemStatusView>;
+  
+  listWorkflows(options?: { status?: string }): Promise<WorkflowView[]>;
+  getWorkflow(id: string): Promise<WorkflowView | undefined>;
+  getWorkflowNodes(workflowId: string): Promise<WorkflowNodeView[]>;
+  getWorkflowArtifacts(workflowId: string): Promise<unknown[]>;
+  
   /** Read-only stale scan for the dashboard banner. */
   recoveryReport(): Promise<{ staleCount: number; thresholdSeconds: number; taskIds: string[] }>;
   /** Bulk apply recovery based on the policy. */
@@ -240,7 +250,7 @@ export interface DashboardService {
   /** Applies recovery to one task (the "Recover" button). */
   recoverTask(id: string): Promise<ControlOutcome>;
   predictNextExternalId(): Promise<string>;
-  createTask(input: { externalId?: string; autoGenerateId?: boolean; title: string; description: string; workspace?: string; acceptanceCriteria?: string[]; maxReviewCycles?: number }): Promise<TaskView>;
+  createTask(input: { externalId?: string; autoGenerateId?: boolean; autoPlan?: boolean; title: string; description: string; workspace?: string; acceptanceCriteria?: string[]; maxReviewCycles?: number }): Promise<TaskView | { workflowId: string }>;
   /**
    * Real execution through the worker: claim, run, persist, stream.
    * Returns as soon as the task is claimed so the HTTP request is not held open
@@ -262,6 +272,7 @@ export interface DashboardServiceOptions {
   workspaceRoot: string;
   /** Real task execution + cooperative interrupts. Absent = control is refused. */
   worker?: TaskWorker;
+  plannerAgent?: import("../agents/planner-agent.js").PlannerAgent;
   /** Stale detection / crash recovery. */
   recovery?: RecoveryService;
   /** Resolves the spec to run a task (task file, then the stored row). */
@@ -856,7 +867,40 @@ export function createDashboardService(options: DashboardServiceOptions): Dashbo
       return repos.tasks.predictNextExternalId();
     },
 
-    async createTask(input): Promise<TaskView> {
+    async createTask(input): Promise<TaskView | { workflowId: string }> {
+      // 1. Complexity Gate: if autoPlan is explicitly requested, invoke PlannerAgent
+      if (input.autoPlan) {
+        if (!options.plannerAgent) {
+          throw new ServiceError("PlannerAgent is not configured", { status: 503, code: "no_planner" });
+        }
+        if (!options.persistence.workflows) {
+          throw new ServiceError("Workflow persistence is not enabled", { status: 503, code: "workflows_disabled" });
+        }
+
+        const externalId = input.externalId?.trim() || `WF-${Date.now().toString(36).toUpperCase()}`;
+        const workspaceDir = input.workspace || `${options.workspaceRoot}/${externalId}`;
+        const objective = `${input.title}\n${input.description}`;
+
+        logger.info("planner.started", { externalId, title: input.title });
+        const spec = await options.plannerAgent.plan(objective, { path: workspaceDir });
+        const record = await options.persistence.workflows.create(spec);
+        const workflowId = record.id;
+        
+        if (options.persistence.workflowDeps) {
+          await options.persistence.workflowDeps.createEdges(workflowId, spec.edges ?? []);
+        }
+        await options.persistence.workflows.updateStatus(workflowId, "VALIDATED");
+        for (const node of spec.nodes) {
+          await options.persistence.workflows.evaluateAndTransitionNodeToReady(workflowId, node.key);
+        }
+
+        logger.info("planner.finished", { externalId, workflowId, nodesCount: spec.nodes.length });
+        
+        // Return a shape indicating workflow creation for future V2 UI
+        return { workflowId };
+      }
+
+      // 2. Default V1 Task Flow
       let task: TaskRecord;
 
       if (input.autoGenerateId) {
@@ -866,16 +910,6 @@ export function createDashboardService(options: DashboardServiceOptions): Dashbo
           workspace: input.workspace || options.workspaceRoot,
           maxReviewCycles: input.maxReviewCycles ?? 3,
         });
-        if (!input.workspace) {
-          // If workspace was omitted and auto-generated, we should probably append the assigned ID
-          // just like the manual fallback below. Wait! We can update the workspace directly.
-          // BUT since we create the task in the database already, it's easier to just generate it correctly.
-          // In the UI, the workspace is always sent for this repo, so we can ignore this edge case for now,
-          // or we can append the task externalId.
-          // Let's just append the task externalId to options.workspaceRoot if not provided.
-          // Oh, wait, the createAuto function inserts the workspace as-is. So we can't do it before we know the ID!
-          // But UI ALWAYS passes workspace in this project. So we are fine.
-        }
       } else {
         const externalId = input.externalId?.trim() || `TASK-${Date.now().toString(36).toUpperCase()}`;
         const existing = await repos.tasks.findByExternalId(externalId);
@@ -1233,6 +1267,27 @@ export function createDashboardService(options: DashboardServiceOptions): Dashbo
       });
 
       return { ok: true, message: "Task approved manually", eventId, task: await describeTask(done.task!) };
+    },
+
+    async listWorkflows(opts) {
+      if (!persistence.workflows) return [];
+      // @ts-expect-error Status cast to WorkflowStatus
+      return persistence.workflows.list(opts);
+    },
+
+    async getWorkflow(id: string) {
+      if (!persistence.workflows) return undefined;
+      return (await persistence.workflows.findById(id)) ?? undefined;
+    },
+
+    async getWorkflowNodes(workflowId: string) {
+      if (!persistence.workflows) return [];
+      return persistence.workflows.findNodes(workflowId);
+    },
+
+    async getWorkflowArtifacts(workflowId: string) {
+      if (!persistence.workflowArtifacts) return [];
+      return persistence.workflowArtifacts.findAll(workflowId);
     },
 
     /** Stale scan for the banner. Read-only: never mutates. */

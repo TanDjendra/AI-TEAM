@@ -12,6 +12,7 @@ import type {
   ProviderHealth,
 } from "../../src/providers/model-provider.js";
 import { OrchestratorService } from "../../src/orchestration/runner.js";
+import { DirectoryWorkspaceResolver } from "../../src/infrastructure/workspace-resolver.js";
 import { cleanupDir, makeTempDir, ScriptedAgent, testConfig } from "../helpers/index.js";
 
 /**
@@ -99,12 +100,17 @@ export async function runOrchestrator(options: RunHarnessOptions): Promise<RunHa
     logger: silentLogger(),
     createCoder: () => coderAgent,
     createReviewer: () => reviewerAgent,
-    prepareWorkspace:
+    workspaceResolver:
       options.prepareWorkspace === false
-        ? async () => {}
-        : async (_task, dir) => {
-            await mkdir(dir, { recursive: true });
-            await mkdir(join(dir, "src"), { recursive: true });
+        ? { resolve: async () => join(workspaceRoot, spec.workspaceSlug ?? spec.id), cleanup: async () => {} }
+        : {
+            resolve: async (task) => {
+              const resolver = new DirectoryWorkspaceResolver(workspaceRoot, silentLogger());
+              const dir = await resolver.resolve(task);
+              await mkdir(join(dir, "src"), { recursive: true });
+              return dir;
+            },
+            cleanup: async () => {}
           },
   });
 

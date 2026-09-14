@@ -40,6 +40,17 @@ async function main() {
     pollIntervalMs: parseInt(process.env.WORKER_POLL_INTERVAL_MS || "5000", 10),
   });
 
+  const { WorkflowScheduler } = await import("../orchestration/workflow-scheduler.js");
+  const workflowScheduler = config.orchestrator.workflowEnabled 
+    ? new WorkflowScheduler({
+        persistence,
+        logger,
+        worker: singleWorker,
+        pollIntervalMs: parseInt(process.env.WORKER_POLL_INTERVAL_MS || "5000", 10),
+        workerPoolSize: config.orchestrator.workerPoolSize,
+      })
+    : undefined;
+
   // Startup Recovery
   logger.info("worker.startup_recovery", { message: "Running initial stale run sweep" });
   await sweeper.sweepOnce();
@@ -49,6 +60,11 @@ async function main() {
 
   // Start the Queue Worker loop
   queueWorker.start();
+  
+  // Start the Workflow Scheduler loop if enabled
+  if (workflowScheduler) {
+    workflowScheduler.start();
+  }
 
   // Heartbeat loop for the worker node
   const workerHeartbeat = setInterval(() => {
@@ -69,6 +85,9 @@ async function main() {
     clearInterval(workerHeartbeat);
     sweeper.stop();
     await queueWorker.stop();
+    if (workflowScheduler) {
+      await workflowScheduler.stop();
+    }
     
     // Set status to STOPPED
     await persistence.workers.heartbeat(workerNode.id, "STOPPED").catch(() => {});

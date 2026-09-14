@@ -32,11 +32,12 @@ describe("task state machine", () => {
       expect(reachableTerminal("APPROVED")).toBe("DONE");
     });
 
-    it("marks DONE and NEEDS_HUMAN as terminal", () => {
+    it("marks DONE, NEEDS_HUMAN and PAUSED as terminal", () => {
       expect(isTerminal("DONE")).toBe(true);
       expect(isTerminal("NEEDS_HUMAN")).toBe(true);
+      expect(isTerminal("PAUSED")).toBe(true);
       for (const state of TASK_STATES) {
-        if (state !== "DONE" && state !== "NEEDS_HUMAN") {
+        if (state !== "DONE" && state !== "NEEDS_HUMAN" && state !== "PAUSED") {
           expect(isTerminal(state)).toBe(false);
         }
       }
@@ -55,6 +56,7 @@ describe("task state machine", () => {
         ["APPROVED", "REVIEW"],
         ["DONE", "CODING"],
         ["NEEDS_HUMAN", "CODING"],
+        ["PAUSED", "CODING"],
       ];
       for (const [from, to] of illegal) {
         expect(canTransition(from, to), `${from} -> ${to} must be illegal`).toBe(false);
@@ -130,6 +132,17 @@ describe("task state machine", () => {
       expect(reachableTerminal("APPROVED")).toBe("DONE");
       expect(reachableTerminal("DONE")).toBeUndefined();
       expect(reachableTerminal("NEEDS_HUMAN")).toBeUndefined();
+      expect(reachableTerminal("PAUSED")).toBeUndefined();
+    });
+
+    it("maps BUDGET_EXCEEDED to PAUSED terminal state", () => {
+      expect(reachableTerminal("REVIEW", "BUDGET_EXCEEDED")).toBe("PAUSED");
+      expect(reachableTerminal("TESTING", "BUDGET_EXCEEDED")).toBe("PAUSED");
+      expect(reachableTerminal("CODING", "BUDGET_EXCEEDED")).toBe("PAUSED");
+      expect(reachableTerminal("APPROVED", "BUDGET_EXCEEDED")).toBe("DONE");
+      expect(reachableTerminal("DONE", "BUDGET_EXCEEDED")).toBeUndefined();
+      expect(reachableTerminal("NEEDS_HUMAN", "BUDGET_EXCEEDED")).toBeUndefined();
+      expect(reachableTerminal("PAUSED", "BUDGET_EXCEEDED")).toBeUndefined();
     });
   });
 });

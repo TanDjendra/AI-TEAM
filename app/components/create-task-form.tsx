@@ -26,6 +26,7 @@ export function CreateTaskForm({ onCreated, className, defaultOpen = false }: Cr
   const [title, setTitle] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [autoGenerate, setAutoGenerate] = React.useState(true);
+  const [autoPlan, setAutoPlan] = React.useState(false);
   const [externalId, setExternalId] = React.useState("");
   const [nextId, setNextId] = React.useState<string | null>(null);
   const [workspace, setWorkspace] = React.useState("");
@@ -48,10 +49,11 @@ export function CreateTaskForm({ onCreated, className, defaultOpen = false }: Cr
     setError(undefined);
     setNotice(undefined);
 
-    const result = await apiPost<TaskView>("/api/tasks", {
+    const result = await apiPost<TaskView | { workflowId: string }>("/api/tasks", {
       title: title.trim(),
       description: description.trim(),
       ...(autoGenerate ? { autoGenerateId: true } : (externalId.trim() ? { externalId: externalId.trim() } : {})),
+      ...(autoPlan ? { autoPlan: true } : {}),
       ...(workspace.trim() ? { workspace: workspace.trim() } : {}),
       maxReviewCycles: Number(maxCycles) || 3,
     });
@@ -63,7 +65,13 @@ export function CreateTaskForm({ onCreated, className, defaultOpen = false }: Cr
       return;
     }
 
-    setNotice(`Created ${result.data.externalId}`);
+    if ("workflowId" in result.data) {
+      setNotice(`Created workflow ${result.data.workflowId}`);
+    } else {
+      setNotice(`Created ${result.data.externalId}`);
+      onCreated?.(result.data);
+    }
+
     setTitle("");
     setDescription("");
     setExternalId("");
@@ -75,8 +83,6 @@ export function CreateTaskForm({ onCreated, className, defaultOpen = false }: Cr
         .then((data) => setNextId(data.nextId))
         .catch(() => setNextId(null));
     }
-    
-    onCreated?.(result.data);
   };
 
   if (!open) {
@@ -158,6 +164,20 @@ export function CreateTaskForm({ onCreated, className, defaultOpen = false }: Cr
               placeholder="e.g. D:\Tan\script\Asist v1.0.0\PROJECT (optional)"
               className="mt-1 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 text-[11px] text-[var(--content)]"
             />
+          </label>
+
+          <label className="block">
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                type="checkbox"
+                checked={autoPlan}
+                onChange={(e) => setAutoPlan(e.target.checked)}
+                className="cursor-pointer"
+              />
+              <span className="text-[11px] text-[var(--content)]">
+                Auto-Plan (Generate workflow for complex task)
+              </span>
+            </div>
           </label>
 
           <label className="block">

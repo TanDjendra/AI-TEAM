@@ -14,6 +14,8 @@ import { CoderAgent } from "../agents/coder-agent.js";
 import { ReviewerAgent } from "../agents/reviewer-agent.js";
 import { CommandRunner } from "../agents/tools.js";
 import { Workspace } from "../agents/workspace.js";
+import { DefaultBudgetAuthorizer, NoopBudgetAuthorizer } from "../services/budget-authorizer.js";
+import { GitWorkspaceResolver, DirectoryWorkspaceResolver } from "../infrastructure/workspace-resolver.js";
 import { createLogger, type Logger } from "../domain/logger.js";
 import type { Agent } from "../domain/types.js";
 import type { ModelProvider } from "../providers/model-provider.js";
@@ -124,13 +126,13 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Runti
     }
   }
 
-  const hooks = persistence
-    ? createPersistenceHooks({
+  const hooksFactory = persistence
+    ? () => createPersistenceHooks({
         bus: persistence.bus,
         recorder: persistence.recorder,
         repositories: persistence.repositories,
         logger,
-        runKey: `run-${Date.now().toString(36)}`,
+        runKey: `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
         provider: "9router",
         models: { coder: config.coder.model, reviewer: config.reviewer.model },
       })
@@ -140,30 +142,43 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Runti
     provider,
     config,
     logger,
-    createCoder: (workspace, observer) =>
-      new CoderAgent({
+    createCoder: (workspace, observer) => {
+      const authorizer = persistence 
+        ? new DefaultBudgetAuthorizer(persistence.usageLedger, config.orchestrator.maxTaskTokens ?? Infinity)
+        : new NoopBudgetAuthorizer();
+      return new CoderAgent({
         provider,
         model: config.coder.model,
+        agentProfile: config.coder.agentProfile,
+        modelProfile: config.coder.modelProfile,
         workspace,
         logger: logger.child({ model_role: "coder" }),
         runner,
         contextCompactionEnabled: config.orchestrator.contextCompactionEnabled,
         contextCompactionRatio: config.orchestrator.contextCompactionRatio,
         modelContextWindow: config.orchestrator.modelContextWindow,
-      }),
-    createReviewer: (workspace, observer) =>
-      new ReviewerAgent({
+        observer,
+        authorizer,
+      });
+    },
+    createReviewer: (workspace, observer) => {
+      const authorizer = persistence 
+        ? new DefaultBudgetAuthorizer(persistence.usageLedger, config.orchestrator.maxTaskTokens ?? Infinity)
+        : new NoopBudgetAuthorizer();
+      return new ReviewerAgent({
         provider,
         model: config.reviewer.model,
-        workspace,
+        agentProfile: config.reviewer.agentProfile,
+        modelProfile: config.reviewer.modelProfile,
         logger: logger.child({ model_role: "reviewer" }),
         observer,
-      }),
-    prepareWorkspace: async (task, dir) => {
-      await mkdir(dir, { recursive: true });
-      logger.debug("workspace.ready", { taskId: task.id, dir });
+        authorizer,
+      });
     },
-    ...(hooks ? { hooks } : {}),
+    workspaceResolver: config.orchestrator.gitWorkspaceEnabled
+      ? new GitWorkspaceResolver(config.orchestrator.workspaceRoot, logger)
+      : new DirectoryWorkspaceResolver(config.orchestrator.workspaceRoot, logger),
+    ...(hooksFactory ? { hooksFactory } : {}),
     ...(persistence
       ? {
           resolveAgentIds: async () => persistence.agentIds,

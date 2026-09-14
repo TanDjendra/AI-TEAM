@@ -22,18 +22,18 @@ import type {
 import { isTaskInterrupt } from "../domain/control.js";
 import { scrubSecrets, toRouterError, truncate } from "../domain/errors.js";
 import type { Logger } from "../domain/logger.js";
+import type { AgentProfile, ModelProfile } from "../domain/types.js";
 import type { ModelProvider } from "../providers/model-provider.js";
 import { addUsage, asStringArray, emptyUsage, extractJsonObject } from "./base-agent.js";
-import { buildTaskEvidence, renderEvidence } from "./evidence.js";
+import { renderEvidence } from "./evidence.js";
 import { REVIEWER_SYSTEM_PROMPT, REVIEWER_USER_INSTRUCTION } from "./prompts.js";
-import type { Workspace } from "./workspace.js";
 import { nullAgentObserver, type AgentObserver } from "./agent-observer.js";
 
 export interface ReviewerAgentOptions {
   provider: ModelProvider;
   model: string;
-  /** Read-only: used solely to snapshot evidence for the prompt. */
-  workspace: Workspace;
+  agentProfile?: AgentProfile;
+  modelProfile?: ModelProfile;
   logger: Logger;
   id?: string;
   /**
@@ -44,6 +44,7 @@ export interface ReviewerAgentOptions {
   temperature?: number;
   /** Instrumentation sink; see CoderAgentOptions.observer. */
   observer?: AgentObserver;
+  authorizer?: import("../domain/budget.js").BudgetAuthorizer;
 }
 
 const SEVERITIES: readonly ReviewSeverity[] = ["NONE", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
@@ -54,21 +55,25 @@ export class ReviewerAgent implements Agent {
 
   private readonly provider: ModelProvider;
   private readonly model: string;
-  private readonly workspace: Workspace;
   private readonly logger: Logger;
   private readonly maxTokens: number;
   private readonly temperature: number;
   private readonly observer: AgentObserver;
+  private readonly agentProfile?: AgentProfile;
+  private readonly modelProfile?: ModelProfile;
+  private readonly authorizer?: import("../domain/budget.js").BudgetAuthorizer;
 
   constructor(options: ReviewerAgentOptions) {
     this.id = options.id ?? "reviewer-agent";
     this.provider = options.provider;
     this.model = options.model;
-    this.workspace = options.workspace;
     this.logger = options.logger;
     this.maxTokens = options.maxTokens ?? 4_096;
     this.temperature = options.temperature ?? 0;
     this.observer = options.observer ?? nullAgentObserver;
+    this.agentProfile = options.agentProfile;
+    this.modelProfile = options.modelProfile;
+    this.authorizer = options.authorizer;
   }
 
   async execute(input: AgentInput): Promise<ReviewerOutput> {
@@ -93,8 +98,10 @@ export class ReviewerAgent implements Agent {
       runReason: input.reason,
     });
 
-    const evidence = await this.buildEvidence(input);
-    const prompt = this.renderPrompt(input, evidence);
+    if (!input.reviewEvidence) {
+      throw new Error("ReviewerAgent requires input.reviewEvidence (V2 architecture).");
+    }
+    const prompt = this.renderPrompt(input);
 
     let usage = emptyUsage();
     let resolvedModel: string | undefined;
@@ -102,8 +109,12 @@ export class ReviewerAgent implements Agent {
 
     try {
       for (let attempt = 1; attempt <= 3; attempt++) {
+        const systemPromptText = this.agentProfile?.systemPromptTemplate
+          ? `${this.agentProfile.systemPromptTemplate}\n\n${REVIEWER_SYSTEM_PROMPT}`
+          : REVIEWER_SYSTEM_PROMPT;
+
         const messages = [
-          { role: "system" as const, content: REVIEWER_SYSTEM_PROMPT },
+          { role: "system" as const, content: systemPromptText },
           {
             role: "user" as const,
             content:
@@ -113,14 +124,40 @@ export class ReviewerAgent implements Agent {
           },
         ];
 
-        const response = await this.provider.chat({
+        const request = {
           model: this.model,
           messages,
           temperature: this.temperature,
           maxTokens: this.maxTokens,
           json: true,
           requestId: `${input.task.id}-c${input.cycle}-reviewer-a${attempt}`,
-        });
+        };
+
+        let reservation: import("../domain/budget.js").BudgetReservation | undefined;
+        if (this.authorizer) {
+          reservation = await this.authorizer.reserve(input.session, this.id, 2048);
+        }
+
+        const response = await this.provider.chat(request);
+
+        if (this.authorizer && reservation) {
+          const costPer1k = this.modelProfile?.costPer1kTokens ?? 0;
+          const estimatedCostUsd = (response.usage.totalTokens / 1000) * costPer1k;
+          const priceVersion = costPer1k > 0 ? "PROFILE_V1" : "UNKNOWN";
+          const profileHash = this.modelProfile ? JSON.stringify(this.modelProfile) : "UNKNOWN_HASH";
+
+          await this.authorizer.reconcile(
+            reservation,
+            input.session,
+            response.usage,
+            request.requestId,
+            input.cycle,
+            this.model,
+            estimatedCostUsd,
+            priceVersion,
+            profileHash
+          );
+        }
 
         usage = addUsage(usage, response.usage);
         resolvedModel = response.resolvedModel;
@@ -212,53 +249,8 @@ export class ReviewerAgent implements Agent {
     }
   }
 
-  private async buildEvidence(input: AgentInput) {
-    const coder = input.previousCoder;
-    // Executions can arrive either as a first-class input field (orchestrator)
-    // or attached to the coder contract. Prefer the explicit one.
-    const executions = input.previousExecutions ?? coder?.executed_commands;
-
-    if (!coder) {
-      // Without a coder contract there is still real material to verify: the
-      // workspace itself. We reconstruct a minimal contract so the evidence
-      // builder can include every file as "wanted".
-      const files = await this.workspace.listFiles({ maxFiles: 5_000 });
-      return buildTaskEvidence({
-        workspace: this.workspace,
-        task: input.task,
-        cycle: input.cycle,
-        attemptCount: 0,
-        coder: {
-          agentId: "unknown",
-          role: "coder",
-          ok: false,
-          status: "BLOCKED",
-          summary: "(no coder output was available for this cycle)",
-          files_changed: files.map((f) => f.path),
-          tests_run: [],
-          tests_passed: false,
-          issues: ["The coder produced no parsable output for this cycle."],
-          notes: "",
-        },
-        ...(executions ? { executed: executions } : {}),
-      });
-    }
-
-    return buildTaskEvidence({
-      workspace: this.workspace,
-      task: input.task,
-      cycle: input.cycle,
-      attemptCount: input.attempt ?? 1,
-      coder,
-      ...(executions ? { executed: executions } : {}),
-    });
-  }
-
-  private renderPrompt(
-    input: AgentInput,
-    evidence: Awaited<ReturnType<typeof buildTaskEvidence>>,
-  ): string {
-    const parts = [renderEvidence(evidence)];
+  private renderPrompt(input: AgentInput): string {
+    const parts = [renderEvidence(input.reviewEvidence!, input.previousCoder, input.cycle, input.attempt ?? 1)];
 
     const failedAttempts = input.previousCoder?.contractParsed === false ? 1 : 0;
     const priorFailures = failedAttempts > 0 ? ["the coder did not return a parsable result object"] : [];

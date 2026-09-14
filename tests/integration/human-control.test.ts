@@ -26,7 +26,7 @@ import type { ModelProvider } from "../../src/providers/model-provider.js";
 import { testConfig, makeCoderOutput, makeReviewerOutput } from "../helpers/index.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, mkdir } from "node:fs/promises";
 
 let testDb: TestDb;
 let workspaceRoot: string;
@@ -51,6 +51,8 @@ function persistenceFor(): { persistence: Persistence; bus: ReturnType<typeof cr
     fileChanges: testDb.fileChanges,
     testResults: testDb.testResults,
     interrupts: testDb.interrupts,
+    workflows: testDb.workflows,
+    workflowDependencies: testDb.workflowDependencies,
   };
   const recorder = createEventRecorder({ repositories, logger });
   recorder.attach(bus);
@@ -156,7 +158,15 @@ async function buildRealWorker(options: {
     logger,
     createCoder: () => options.coder,
     createReviewer: () => options.reviewer,
-    hooks: createPersistenceHooks({
+    workspaceResolver: {
+      resolve: async (task) => {
+        const dir = join(workspaceRoot, "control", task.workspaceSlug ?? task.id);
+        await mkdir(dir, { recursive: true });
+        return dir;
+      },
+      cleanup: async () => {}
+    },
+    hooksFactory: () => createPersistenceHooks({
       bus,
       recorder: persistence.recorder,
       repositories: persistence.repositories,

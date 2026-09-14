@@ -43,6 +43,7 @@ import {
   nullAgentObserver,
   type AgentObserver,
 } from "./agent-observer.js";
+import type { AgentProfile, ModelProfile } from "../domain/types.js";
 import type {
   ModelMessage,
   ModelProvider,
@@ -80,6 +81,8 @@ import { Workspace, snapshotWorkspace, type FileChange } from "./workspace.js";
 export interface CoderAgentOptions {
   provider: ModelProvider;
   model: string;
+  agentProfile?: AgentProfile;
+  modelProfile?: ModelProfile;
   workspace: Workspace;
   logger: Logger;
   id?: string;
@@ -102,6 +105,7 @@ export interface CoderAgentOptions {
   contextCompactionEnabled?: boolean;
   contextCompactionRatio?: number;
   modelContextWindow?: number;
+  authorizer?: import("../domain/budget.js").BudgetAuthorizer;
 }
 
 interface ExecutedCommand {
@@ -150,6 +154,9 @@ export class CoderAgent implements Agent {
   private readonly contextCompactionEnabled: boolean;
   private readonly contextCompactionRatio: number;
   private readonly modelContextWindow: number;
+  private readonly agentProfile?: AgentProfile;
+  private readonly modelProfile?: ModelProfile;
+  private readonly authorizer?: import("../domain/budget.js").BudgetAuthorizer;
 
   constructor(options: CoderAgentOptions) {
     this.id = options.id ?? "coder-agent";
@@ -165,10 +172,17 @@ export class CoderAgent implements Agent {
     this.tools =
       options.tools ??
       createCoderTools(this.workspace, options.runner ?? new CommandRunner());
+    // Filter tools if restricted by profile
+    if (options.agentProfile?.allowedTools) {
+      this.tools = this.tools.filter(t => options.agentProfile!.allowedTools!.includes(t.name));
+    }
     this.toolSpecs = toolsAsJsonSchema(this.tools);
     this.contextCompactionEnabled = options.contextCompactionEnabled ?? false;
     this.contextCompactionRatio = options.contextCompactionRatio ?? 0.75;
-    this.modelContextWindow = options.modelContextWindow ?? 128_000;
+    this.modelContextWindow = options.modelContextWindow ?? options.modelProfile?.contextWindow ?? 128_000;
+    this.agentProfile = options.agentProfile;
+    this.modelProfile = options.modelProfile;
+    this.authorizer = options.authorizer;
   }
 
   async execute(input: AgentInput): Promise<CoderOutput> {
@@ -189,8 +203,12 @@ export class CoderAgent implements Agent {
     let lastText = "";
     let toolTurns = 0;
 
+    const systemPromptText = this.agentProfile?.systemPromptTemplate
+      ? `${this.agentProfile.systemPromptTemplate}\n\n${coderSystemPrompt(this.tools)}`
+      : coderSystemPrompt(this.tools);
+
     const messages: ModelMessage[] = [
-      { role: "system", content: coderSystemPrompt(this.tools) },
+      { role: "system", content: systemPromptText },
       {
         role: "user",
         content: `${buildTaskBrief(input)}\n\n${
@@ -265,7 +283,33 @@ export class CoderAgent implements Agent {
           toolChoice: forcingFinalAnswer ? "none" : "auto",
         };
 
+        let reservation: import("../domain/budget.js").BudgetReservation | undefined;
+        if (this.authorizer) {
+          // A flat estimate for the pending request (e.g. 4096)
+          reservation = await this.authorizer.reserve(input.session, this.id, 4096);
+        }
+
         const response = await this.provider.chat(request);
+
+        if (this.authorizer && reservation) {
+          const costPer1k = this.modelProfile?.costPer1kTokens ?? 0;
+          const estimatedCostUsd = (response.usage.totalTokens / 1000) * costPer1k;
+          const priceVersion = costPer1k > 0 ? "PROFILE_V1" : "UNKNOWN";
+          const profileHash = this.modelProfile ? JSON.stringify(this.modelProfile) : "UNKNOWN_HASH";
+          
+          await this.authorizer.reconcile(
+            reservation,
+            input.session,
+            response.usage,
+            request.requestId ?? "unknown",
+            input.cycle,
+            this.model,
+            estimatedCostUsd,
+            priceVersion,
+            profileHash
+          );
+        }
+
         usage = addUsage(usage, response.usage);
         resolvedModel = response.resolvedModel;
         lastText = response.content;

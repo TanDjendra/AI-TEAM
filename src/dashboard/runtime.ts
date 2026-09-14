@@ -35,6 +35,7 @@ export interface DashboardRuntime {
   hub: RealtimeHub;
   service?: DashboardService;
   sweeper?: StaleSweeper;
+  workflowScheduler?: import("../orchestration/workflow-scheduler.js").WorkflowScheduler;
   /** Populated when the runtime could not be built. */
   error?: string;
 }
@@ -57,6 +58,7 @@ export interface DashboardRuntimeOptions {
     recovery?: RecoveryService;
     loadSpec?(task: TaskRecord): Promise<TaskSpec>;
     staleThresholdMs?: number;
+    plannerAgent?: import("../agents/planner-agent.js").PlannerAgent;
   };
 }
 
@@ -117,6 +119,7 @@ export async function createDashboardRuntime(options: DashboardRuntimeOptions): 
     },
     workspaceRoot: config.orchestrator.workspaceRoot || join(process.cwd(), "workspace"),
     ...(control.worker ? { worker: control.worker } : {}),
+    ...(control.plannerAgent ? { plannerAgent: control.plannerAgent } : {}),
     ...(control.recovery ? { recovery: control.recovery } : {}),
     loadSpec: control.loadSpec,
     staleThresholdMs: control.staleThresholdMs,
@@ -132,6 +135,7 @@ export async function createDashboardRuntime(options: DashboardRuntimeOptions): 
     ...(control.worker ? { worker: control.worker } : {}),
     ...(control.recovery ? { recovery: control.recovery } : {}),
     ...("sweeper" in control && control.sweeper ? { sweeper: control.sweeper } : {}),
+    ...("workflowScheduler" in control && control.workflowScheduler ? { workflowScheduler: control.workflowScheduler } : {}),
   };
 }
 
@@ -154,6 +158,8 @@ async function buildControl(
   worker?: TaskWorker;
   recovery?: RecoveryService;
   sweeper?: StaleSweeper;
+  workflowScheduler?: import("../orchestration/workflow-scheduler.js").WorkflowScheduler;
+  plannerAgent?: import("../agents/planner-agent.js").PlannerAgent;
   loadSpec: (task: TaskRecord) => Promise<TaskSpec>;
   staleThresholdMs: number;
 }> {
@@ -193,6 +199,7 @@ async function buildControl(
   };
 
   let worker: TaskWorker | undefined;
+  let plannerAgent: import("../agents/planner-agent.js").PlannerAgent | undefined;
   try {
     const runtime = await createOrchestrationRuntime({ existingPersistence: persistence });
     worker = new SingleProcessWorker({
@@ -205,6 +212,11 @@ async function buildControl(
           interrupts: persistence.repositories.interrupts,
           taskId: internalTaskId,
         }),
+    });
+
+    const { PlannerAgent } = await import("../agents/planner-agent.js");
+    plannerAgent = new PlannerAgent({
+      modelProvider: runtime.provider,
     });
   } catch (error) {
     logger.error("control.worker_unavailable", {
@@ -221,10 +233,25 @@ async function buildControl(
   await sweeper.sweepOnce();
   sweeper.start();
 
+  let workflowScheduler: import("../orchestration/workflow-scheduler.js").WorkflowScheduler | undefined;
+  if (config.orchestrator.workflowEnabled && worker) {
+    const { WorkflowScheduler } = await import("../orchestration/workflow-scheduler.js");
+    workflowScheduler = new WorkflowScheduler({
+      persistence,
+      logger,
+      worker,
+      pollIntervalMs: 5000,
+      workerPoolSize: config.orchestrator.workerPoolSize,
+    });
+    workflowScheduler.start();
+  }
+
   return {
     ...(worker ? { worker } : {}),
+    ...(plannerAgent ? { plannerAgent } : {}),
     recovery,
     sweeper,
+    ...(workflowScheduler ? { workflowScheduler } : {}),
     loadSpec: async (task) => {
       // Register the watcher up front so the very first safe point can see a
       // pause requested microseconds after Start.

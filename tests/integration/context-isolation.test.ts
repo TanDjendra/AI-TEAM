@@ -20,7 +20,7 @@
  * This file is an AUDIT artifact. It adds no production feature.
  */
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -183,7 +183,7 @@ describe("context isolation — coder payload (TASK-A history must not reach TAS
       title: "big history task",
       description: "produce a large transcript",
     };
-    const outputA = await coderA.execute({ task: taskA, workspacePath: root, cycle: 1, reason: "INITIAL" });
+    const outputA = await coderA.execute({ task: taskA, session: { task: taskA } as any, workspacePath: root, cycle: 1, reason: "INITIAL" });
 
     // Sanity: TASK-A really produced a multi-turn history with the secrets in it.
     expect(providerA.calls.length).toBeGreaterThanOrEqual(6);
@@ -216,7 +216,7 @@ describe("context isolation — coder payload (TASK-A history must not reach TAS
     });
 
     const taskB: TaskSpec = { id: "TASK-B", title: "second task", description: "unrelated follow-up work" };
-    const outputB = await coderB.execute({ task: taskB, workspacePath: root, cycle: 1, reason: "INITIAL" });
+    const outputB = await coderB.execute({ task: taskB, session: { task: taskB } as any, workspacePath: root, cycle: 1, reason: "INITIAL" });
 
     const payloadB = providerB.allContent();
     const taskBBytes = providerB.calls.reduce((sum, call) => sum + JSON.stringify(call.messages).length, 0);
@@ -288,6 +288,7 @@ describe("context isolation — coder payload (TASK-A history must not reach TAS
     const taskB: TaskSpec = { id: "TASK-B", title: "fix task", description: "apply required fixes" };
     await coderB.execute({
       task: taskB,
+      session: { task: taskB } as any,
       workspacePath: root,
       cycle: 2,
       reason: "FIX",
@@ -362,6 +363,14 @@ describe("context isolation — orchestrator AgentInput carries only current-tas
           logger,
           createCoder: () => coder,
           createReviewer: () => reviewer,
+          workspaceResolver: {
+            resolve: async (task) => {
+              const dir = join(workspaceRoot, task.workspaceSlug ?? task.id);
+              await mkdir(dir, { recursive: true });
+              return dir;
+            },
+            cleanup: async () => {}
+          },
         });
 
       const specA: TaskSpec = { id: "TASK-A", title: "A", description: "first task" };
@@ -393,7 +402,7 @@ describe("context isolation — orchestrator AgentInput carries only current-tas
       expect(coderBInputKeys).not.toContain("messages");
       expect(coderBInputKeys).not.toContain("history");
       expect(coderBInputKeys).not.toContain("transcript");
-      expect(coderBInputKeys).not.toContain("session");
+      expect(coderBInputKeys).not.toContain("transcript");
     } finally {
       await rm(workspaceRoot, { recursive: true, force: true }).catch(() => {});
     }

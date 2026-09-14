@@ -67,6 +67,9 @@ export async function POST(request: Request) {
       ...(typeof body.autoGenerateId === "boolean"
         ? { autoGenerateId: body.autoGenerateId }
         : {}),
+      ...(typeof body.autoPlan === "boolean"
+        ? { autoPlan: body.autoPlan }
+        : {}),
       ...(typeof body.externalId === "string" && body.externalId.trim()
         ? { externalId: body.externalId.trim().slice(0, 100) }
         : {}),
