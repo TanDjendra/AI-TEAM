@@ -1,584 +1,533 @@
-# AI-TEAM V2 — Execution Protocol
+# AI-TEAM V2 — EXECUTION PROTOCOL
 
-**Purpose:** Define standardized workflow, quality gates, and commit discipline for all development sessions.
+## 1. PURPOSE
 
-**Version:** 1.0  
-**Last Updated:** Session 02 (Phase 2 Product CLI)
+This document defines the permanent execution rules for the AI-TEAM V2 productization project.
 
----
+The repository is the source of truth.
 
-## Development Session Lifecycle
+Do not rely on conversation history as the primary project memory.
 
-### Before Starting Any Session
+Primary sources of truth:
 
-1. **Verify Base Commit**
-   ```bash
-   git log --oneline -10
-   git show <base-commit-hash> --stat
-   ```
-   
-2. **Check Working Tree**
-   ```bash
-   git status
-   ```
-   Must be clean or have documented uncommitted changes.
-
-3. **Read Current State**
-   - `docs/implementation/STATE.md` — Latest phase tracker
-   - `docs/implementation/SESSION-XX.md` — Previous session report
-
-4. **Review Constraints**
-   - What is IN SCOPE for this session
-   - What is OUT OF BOUND (STOP boundary)
-   - Backward compatibility requirements
+- Actual repository code
+- Git history
+- docs/implementation/STATE.md
+- docs/implementation/SESSION-NN.md
+- Tests
+- Actual runtime behavior
 
 ---
 
-### During Implementation
+## 2. SESSION MODEL
 
-#### Code Quality Rules
+The implementation is divided into controlled sessions.
 
-1. **Reuse First Principle**
-   - Always check if existing service can solve the problem
-   - Never duplicate configuration logic
-   - No parallel error handling systems
-   - No new model registries
+### SESSION 1
 
-2. **Windows-First Approach**
-   - Use `node:path` APIs only (never bash paths)
-   - No Unix-only commands (`chmod`, `sed`, etc.)
-   - Cross-platform process handling
-   - Test on Windows environment
+Phase 0 — Audit
+Phase 1 — Configuration Foundation
 
-3. **Secret Security**
-   - Never log secret values
-   - Mask secrets using `maskSecret()` before display
-   - Keep `.env` authoritative for secrets
-   - Backup `.env.bak` before writes
+### SESSION 2
 
-4. **TypeScript Strictness**
-   - Type annotations on ALL config objects
-   - No `any` types unless absolutely necessary
-   - Literal types preferred (`version: 1` not `number`)
-   - Pass `npm run typecheck` before testing
+Phase 2 — Product CLI
 
----
+### SESSION 3
 
-### Testing Discipline
+Phase 3 — Next.js Setup Wizard
 
-#### Required Tests Per Session
+### SESSION 4
 
-1. **TypeScript Compilation**
-   ```bash
-   npm run typecheck
-   ```
-   Expected result: 0 errors
+Phase 4 — Model Discovery / Import
 
-2. **Unit Tests**
-   ```bash
-   npm test
-   ```
-   Track baseline: Document pre-existing failures separately from new ones
+### SESSION 5
 
-3. **Integration Verification**
-   - Manual test of key features
-   - Verify backward compatibility with existing CLI flags
-   - Test edge cases and error conditions
+Phase 5 — Process Launcher
 
-4. **Backward Compatibility Check**
-   ```bash
-   npm run task -- --check-router
-   npm run task -- --check-db
-   npm run worker
-   npm run dev
-   ```
-   All must continue working without modification.
+### SESSION 6
 
-#### Failure Classification
+Phase 6 — Hardening + Full Regression + Documentation
 
-| Failure Type | Action Required |
-|--------------|-----------------|
-| Pre-existing | Document, don't fix (unless in scope) |
-| New regression | FIX BEFORE COMMIT |
-| Environment-specific | Skip or mock appropriately |
-| Type errors | Fix compilation first |
+Do not attempt to complete all phases in one session.
 
 ---
 
-### Documentation Standards
+## 3. SESSION START
 
-#### SESSION-XX.md Template Structure
+At the beginning of every new session:
 
-Every session MUST produce a documentation file following this pattern:
+1. Read this file.
+2. Read docs/implementation/STATE.md.
+3. Read the previous session checkpoint.
+4. Run git status.
+5. Run git log --oneline -10.
+6. Inspect the previous phase's commit.
+7. Verify the previous phase using the actual repository.
+8. Run relevant tests.
+9. Only then begin the current phase.
 
-```markdown
-# AI-TEAM V2 — Implementation Session XX
-
-**Phase:** [Number] — [Name]
-**Status:** COMPLETE/PARTIAL/FAILED
-**Date:** [Session date]
-**Model:** [AI model used]
-**Base commit:** [Commit hash]
-
----
-
-## Objective
-[Clear statement of what this session aimed to build]
+Never assume the previous phase is complete only because a previous chat reported it as complete.
 
 ---
 
-## Scope Delivered
-| Deliverable | Location | Status |
-|-------------|----------|--------|
-| ... | ... | ✅ Complete |
+## 4. GIT IS PROJECT MEMORY
+
+Conversation history is secondary.
+
+Git history and the actual repository state are authoritative.
+
+Every completed phase must have a Git commit.
+
+Do not rewrite Git history destructively.
+
+Do not use destructive reset operations unless explicitly required and understood.
 
 ---
 
-## Files Changed
+## 5. STATE AND CHECKPOINTS
 
-### Files Added
-[List new files with brief description]
+docs/implementation/STATE.md is the current project state.
 
-### Files Modified
-[List modified files with rationale]
+docs/implementation/SESSION-NN.md records the work performed in a session.
 
----
+Keep both synchronized with the actual repository.
 
-## Commands/Features Implemented
-[Detailed descriptions of each command or feature]
+A checkpoint should record:
 
----
+- Phase
+- Objective
+- Starting commit
+- Files added
+- Files modified
+- Files deleted
+- Important architecture decisions
+- Tests run
+- Actual test results
+- Regression status
+- Security notes
+- Known issues
+- Ending commit
+- Next session
 
-## DEF-[XXX] Status
-[Track defect repair progress]
+Never put the following into state or checkpoint files:
 
-**Problem:** [Description]
-**Resolution:** [What was done]
-**Evidence:** [Test results showing improvement]
-
----
-
-## Backward Compatibility Verification
-[Proof that existing functionality still works]
-
-### Existing Commands Still Work
-✅ Command 1 verified
-✅ Command 2 verified
-
-### Test Results
-```bash
-[npm test output]
-```
+- API keys
+- Tokens
+- Passwords
+- Credentials
+- Secrets
 
 ---
 
-## Architecture Compliance
-[How implementation respects architectural principles]
+## 6. PHASE BOUNDARY
 
-### Service Reuse Matrix
-| Feature | Reused Service | Module |
-|---------|----------------|--------|
-| ... | ... | ... |
+Every phase follows this sequence:
 
----
+IMPLEMENT
+→ TEST
+→ FIX
+→ RETEST
+→ CHECKPOINT
+→ UPDATE STATE.md
+→ COMMIT
+→ STOP
 
-## Known Limitations
-[Intentional MVP choices or deferred work]
-
----
-
-## Git Status
-Current state before commit
+Do not skip validation, checkpointing, or commit.
 
 ---
 
-## Next Session Plan
-What will be tackled next (do NOT start it yet)
-```
+## 7. HARD STOP RULE
+
+When the current phase is complete:
+
+STOP.
+
+Do not begin the next phase in the same session.
+
+The next phase must begin in a new session.
+
+Correct workflow:
+
+Phase complete
+→ tests
+→ checkpoint
+→ STATE.md
+→ commit
+→ STOP
+
+Incorrect workflow:
+
+Phase complete
+→ immediately start next phase
+
+The purpose is to keep context clean and make every phase independently reviewable.
 
 ---
 
-## STATE.md Updates
+## 8. PREVIOUS PHASE VERIFICATION
 
-At end of EVERY session, update `docs/implementation/STATE.md`:
+At the start of every new session, verify the previous phase.
 
-1. Update "Current phase" line
-2. Mark completed phases as COMPLETE
-3. Add phase deliverables table
-4. Update test statistics
-5. Document any open defects resolved
-6. List "Next session plan" section
+If STATE.md says COMPLETE but the repository or tests disagree:
 
----
+BLOCKED
 
-### Commit Discipline
+Investigate the previous phase before continuing.
 
-#### Before Committing
-
-1. **Run Full Verification**
-   ```bash
-   npm run verify
-   ```
-   
-2. **Check Diff Consistency**
-   ```bash
-   git diff --stat
-   git diff --name-status
-   ```
-   Verify all changed files are documented in SESSION-XX.md
-   
-3. **Ensure Clean Working Tree**
-   ```bash
-   git status --short
-   ```
-   Only include committed files in session scope
-
-#### Commit Message Format
-
-```
-<type>(<scope>): <subject>
-
-[Optional body with context]
-
-BREAKING CHANGE: <description if applicable>
-```
-
-**Types:**
-- `feat`: New functionality
-- `fix`: Bug fix
-- `docs`: Documentation only
-- `refactor`: Code restructuring
-- `chore`: Build/tooling changes
-- `test`: Test additions
-
-**Scopes:**
-- `cli`: Product CLI commands
-- `config`: Configuration system
-- `domain`: Core domain logic
-- `orchestration`: Scheduler/workflow
-- `persistence`: Database layer
-- `tests`: Test infrastructure
+Do not blindly trust historical reports.
 
 ---
 
-## STOP BOUNDARIES
+## 9. CORE PROTECTION
 
-### Critical Rule: DO NOT START NEXT PHASE
+The existing AI-TEAM V2 orchestration core is considered stable.
 
-Even if you're near completion:
+Be especially conservative with:
 
-1. **Stop at the defined boundary**
-2. **Document remaining work clearly**
-3. **Commit current state**
-4. **Wait for review before starting next phase**
+- src/domain/*
+- src/orchestration/*
+- src/agents/*
+- src/providers/*
+- src/persistence/*
 
-This prevents:
-- Scope creep within a single session
-- Overcomplicating implementations
-- Losing track of what was actually completed vs planned
+Productization should preferably be implemented around the existing core.
 
-### Stop Boundary Checklist
+Do not perform broad refactors simply to make implementation easier.
 
-Before ending a session, verify:
+If changing core behavior becomes necessary:
 
-- [ ] All scope items implemented
-- [ ] All tests pass (pre-existing failures documented)
-- [ ] Backward compatibility maintained
-- [ ] Documentation complete
-- [ ] Git status clean
-- [ ] NEXT PHASE NOT STARTED
-
-If any checkbox fails → FIX before stopping.
+1. Stop.
+2. Explain why.
+3. Identify affected files.
+4. Identify the risk.
+5. Choose the smallest safe change.
 
 ---
 
-## Quality Gates
+## 10. BACKWARD COMPATIBILITY
 
-### Gate 1: TypeScript Compilation
-- Must pass with 0 errors
-- If any errors → cannot proceed to testing
+Existing developer functionality must remain functional unless explicitly changed by an approved architecture decision.
 
-### Gate 2: Unit Tests
-- All NEW tests must pass
-- Pre-existing failures documented separately
-- If NEW failures appear → investigate immediately
+Current compatibility examples include:
 
-### Gate 3: Integration Tests
-- Manual verification of user-facing features
-- Existing CLI flags still work
-- Configuration loads correctly
-- If issues found → fix before proceeding
-
-### Gate 4: Documentation
-- SESSION-XX.md complete and accurate
-- STATE.md updated with latest status
-- README (if applicable) reflects changes
-- If missing → complete before commit
-
-### Gate 5: Final Verification
-```bash
-npm run verify
-git status
-git diff --stat
-```
-All checks green → READY TO COMMIT
-
----
-
-## Common Pitfalls & Solutions
-
-### Pitfall 1: Duplicate Logic
-
-**Symptom:** Same config validation code appears in multiple places
-
-**Solution:** 
-- Create shared utility function
-- Export from common module
-- Import everywhere needed
-
-### Pitfall 2: Hardcoded Values
-
-**Symptom:** Models/URLs hard-coded in CLI output
-
-**Solution:**
-- Trace back to source
-- Remove hardcoded value
-- Use existing model/profile system
-
-### Pitfall 3: Overclaiming Features
-
-**Symptom:** Documentation says "real health checks" but only checks config existence
-
-**Solution:**
-- Be precise about what checks are performed
-- Document actual capabilities
-- Don't overpromise
-
-### Pitfall 4: Breaking Backward Compatibility
-
-**Symptom:** Existing CLI flags stop working after changes
-
-**Solution:**
-- Review all `npm run task` flags
-- Test each one explicitly
-- Never modify existing CLI entry point unless required
-
----
-
-## Communication Protocol
-
-### When Reporting Issues
-
-Use this format:
-
-```
-ISSUE REPORT
-
-Symptom: [What happened]
-Expected: [What should happen]
-Actual: [What did happen]
-Reproduction Steps: [How to reproduce]
-Root Cause: [Analysis if known]
-Impact: [Scope of problem]
-Recommendation: [Suggested fix]
-```
-
-### When Seeking Clarification
-
-Provide:
-1. Context (what session, what phase)
-2. Specific question (not just "I'm stuck")
-3. Options considered
-4. Recommendation with justification
-
----
-
-## Version Tracking
-
-### Semantic Versioning
-
-- **Major**: Breaking API changes
-- **Minor**: New features, backward compatible
-- **Patch**: Bug fixes only
-
-### Version History
-
-```
-0.1.x → Initial alpha releases
-1.x.x → Stable core releases
-2.x.x → Product CLI + Setup Wizard
-```
-
-Each session increments version when appropriate.
-
----
-
-## File Organization
-
-### Directory Structure
-
-```
-src/
-  cli/              # All CLI entry points
-    product-cli.ts  # Product CLI (Phase 2+)
-    worker.ts       # Worker process
-  config/           # Configuration system
-    env.ts          # Environment loader
-    secret-store.ts # .env management
-    config-file.ts  # JSON config reader/writer
-  domain/           # Core business logic
-    logger.ts
-    types.ts
-    errors.ts
-  orchestration/    # Workflow engine
-  persistence/      # Database layer
-  tests/            # Test suites
-    unit/           # Unit tests
-    integration/    # Integration tests
-    e2e/            # End-to-end tests
-docs/
-  implementation/   # Implementation tracking
-    STATE.md        # Living status document
-    SESSION-XX.md   # Session reports
-```
-
----
-
-## Emergency Procedures
-
-### If Tests Start Failing Unexpectedly
-
-1. **Identify if pre-existing**
-   ```bash
-   git stash
-   npm test
-   git stash pop
-   ```
-   
-2. **Isolate recent changes**
-   ```bash
-   git diff HEAD~1 src/
-   ```
-   
-3. **Rollback if critical**
-   ```bash
-   git reset --soft HEAD~1
-   ```
-   
-4. **Communicate immediately**
-
----
-
-## Success Criteria
-
-### Every Session Should Deliver
-
-1. ✅ Functional code meeting specifications
-2. ✅ Zero regressions introduced
-3. ✅ Comprehensive documentation
-4. ✅ Passing tests (with clear failure classification)
-5. ✅ Clean git state ready to push
-
-### Sign-Off Process
-
-When all criteria met:
-
-1. Author reviews own work against checklist
-2. Document findings in SESSION-XX.md
-3. Commit with clear message
-4. Mark session as COMPLETE in STATE.md
-5. **DO NOT START NEXT PHASE**
-
----
-
-## Appendix A: Common Commands Cheat Sheet
-
-```bash
-# Status checks
-git status
-git log --oneline -10
+npm run task -- --check-router
+npm run task -- --check-db
+npm run task -- --plan
+npm run task -- --start-scheduler
+npm run worker
+npm run dev
 npm run verify
 
-# Testing
+Do not replace existing functionality when a thin adapter can reuse it.
+
+---
+
+## 11. CONFIGURATION RULE
+
+Maintain one canonical configuration architecture.
+
+Do not create duplicate configuration systems.
+
+Current intended separation:
+
+Secrets
+→ .env
+
+Non-secret models/roles/configuration
+→ ai-team.config.json
+
+Runtime-only state
+→ process/runtime memory
+
+Secrets must never be stored in the JSON configuration.
+
+Reuse existing configuration services whenever possible.
+
+---
+
+## 12. SECRET SAFETY
+
+Never commit:
+
+- API keys
+- tokens
+- passwords
+- private credentials
+- .env
+
+Never expose secrets through:
+
+- logs
+- stdout
+- stderr
+- frontend payloads
+- checkpoint files
+- error messages
+- Git
+
+Use the existing redaction and masking infrastructure.
+
+---
+
+## 13. WINDOWS SUPPORT
+
+Windows is a supported development environment.
+
+Do not rely on Unix-only shell behavior.
+
+Avoid assumptions involving:
+
+- cp
+- rm
+- chmod
+- bash-only syntax
+- Unix-only process behavior
+
+Prefer cross-platform Node.js APIs.
+
+When executing shell commands, use syntax compatible with the actual environment.
+
+---
+
+## 14. DEPENDENCY RULE
+
+Before adding a dependency:
+
+1. Check whether the repository already provides the capability.
+2. Reuse existing dependencies when practical.
+3. Add a dependency only when necessary.
+4. Document the reason.
+
+Do not add multiple libraries for overlapping functionality.
+
+---
+
+## 15. TESTING RULE
+
+Every phase must have relevant validation.
+
+General checks:
+
 npm run typecheck
 npm test
-npx tsx src/cli/product-cli.ts --help
+npm run verify
 
-# Building
-npm run build
-npx tsc -p tsconfig.build.json
+Run additional build, integration, live, or E2E tests when relevant.
 
-# Verification
+Never claim a test passed unless it was actually executed.
+
+---
+
+## 16. TEST FAILURE CLASSIFICATION
+
+If a test failed before the current changes:
+
+PRE-EXISTING FAILURE
+
+If a test begins failing because of the current changes:
+
+REGRESSION
+
+Do not delete, weaken, skip, or bypass a test simply to obtain a green result.
+
+---
+
+## 17. SECURITY STOP CONDITION
+
+Stop immediately when implementation creates uncertainty involving:
+
+- credential persistence
+- secret exposure
+- unsafe encryption
+- arbitrary code execution
+- destructive configuration replacement
+- unsafe migrations
+
+Do not guess.
+
+Report the issue and identify the safest resolution.
+
+---
+
+## 18. ARCHITECTURE CONFLICT STOP CONDITION
+
+If the existing repository conflicts with the planned architecture, do not silently choose one.
+
+Report:
+
+CONFLICT
+CURRENT BEHAVIOR
+PLANNED BEHAVIOR
+RISK
+OPTIONS
+RECOMMENDED RESOLUTION
+
+Prefer the smallest safe change.
+
+---
+
+## 19. FILE CHANGE DISCIPLINE
+
+Prefer small, focused changes.
+
+Avoid:
+
+- unrelated formatting
+- mass renaming
+- unrelated refactors
+- unnecessary file churn
+
+At every phase record:
+
+FILES ADDED
+FILES MODIFIED
+FILES DELETED
+
+---
+
+## 20. COMMIT DISCIPLINE
+
+Prefer one focused commit per completed phase.
+
+Recommended commit convention:
+
+phase-1-config-foundation
+phase-2-product-cli
+phase-3-setup-wizard
+phase-4-model-import
+phase-5-process-launcher
+phase-6-hardening
+
+Before committing:
+
+git status
 git diff --stat
-git diff --name-status
-```
+npm run typecheck
+npm test
+npm run verify
+
+Run additional validation when required.
 
 ---
 
-## Appendix B: Testing Quick Reference
+## 21. HANDOFF BETWEEN SESSIONS
 
-### New Tests Pattern
+A new session must not depend on chat history.
 
-```typescript
-import { describe, it, expect, beforeEach } from "vitest";
+The handoff consists of:
 
-let testDir: string;
+EXECUTION-PROTOCOL.md
++
+STATE.md
++
+previous SESSION-NN.md
++
+Git commit
 
-beforeEach(() => {
-  testDir = mkdtempSync(join(tmpdir(), "test-prefix-"));
-});
+New session flow:
 
-afterEach(() => {
-  rmSync(testDir, { recursive: true, force: true });
-});
-
-describe("Feature Name", () => {
-  it("handles happy path", () => {
-    // Arrange
-    const input = setupTestData();
-    
-    // Act
-    const result = operate(input);
-    
-    // Assert
-    expect(result).toBe(expectedValue);
-  });
-
-  it("handles error condition", () => {
-    const input = problematicData();
-    
-    expect(() => operate(input)).toThrowError(Error);
-  });
-});
-```
-
-### Mock Pattern (when no live dependencies allowed)
-
-```typescript
-// In test file
-vi.mock("../../src/module.js", () => ({
-  realFunction: vi.fn().mockReturnValue(mockedValue),
-  anotherExport: mockedObject,
-}));
-```
+READ PROTOCOL
+→ READ STATE
+→ READ PREVIOUS CHECKPOINT
+→ VERIFY GIT
+→ VERIFY PREVIOUS PHASE
+→ EXECUTE CURRENT PHASE
 
 ---
 
-## Appendix C: Security Checklist
+## 22. RECOVERY AFTER INTERRUPTION
 
-For every session involving user data or credentials:
+If a session stops unexpectedly:
 
-- [ ] No secrets in logs
-- [ ] No secrets in test outputs
-- [ ] No secrets in error messages
-- [ ] Secrets masked when displayed
-- [ ] Backup created before modifications
-- [ ] Atomic writes confirmed
-- [ ] File permissions set appropriately
-- [ ] No plaintext secrets in git-tracked files
+1. Inspect git status.
+2. Inspect recent commits.
+3. Read STATE.md.
+4. Read the latest session checkpoint.
+5. Inspect current diff.
+6. Run relevant tests.
+
+Never assume unfinished work is safe.
+
+If the state is ambiguous:
+
+BLOCKED
+
+Investigate before continuing.
 
 ---
 
-**END OF PROTOCOL**
+## 23. NO FAKE SUCCESS
 
-Use this protocol as your guide for disciplined, consistent, high-quality development sessions.
+Never claim:
+
+- tests passed
+- router connected
+- database healthy
+- models imported
+- dashboard working
+- build successful
+
+unless there is actual evidence.
+
+When appropriate, distinguish:
+
+CONFIRMED
+INFERRED
+UNKNOWN
+
+---
+
+## 24. PHASE SCOPE RULE
+
+Each session must work only within the assigned phase.
+
+Do not silently implement future-phase functionality.
+
+Phase 2
+→ Product CLI only
+
+Phase 3
+→ Setup Wizard only
+
+Phase 4
+→ Model Discovery / Import only
+
+Phase 5
+→ Process Launcher only
+
+Phase 6
+→ Hardening / Regression / Documentation only
+
+Small prerequisite changes are allowed only when necessary for the current phase and should be documented.
+
+---
+
+## 25. HUMAN REVIEW BOUNDARY
+
+A phase is not considered approved merely because the executor reports success.
+
+The owner may review:
+
+- diff
+- tests
+- architecture decisions
+- security implications
+- commit history
+
+The next session should begin only after the previous phase has been reviewed or explicitly accepted.
+
+---
+
+## 26. FINAL PRINCIPLE
+
+KEEP THE ENGINE
+
+PRODUCTIZE THE EXPERIENCE
+
+USE GIT AS MEMORY
+
+USE CHECKPOINTS AS HANDOFF
+
+STOP AT EVERY PHASE BOUNDARY
+
+VERIFY EVERYTHING
