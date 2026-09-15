@@ -1,4 +1,4 @@
-import { handleError, jsonOk, readJsonBody, withService } from "../../../../src/dashboard/http.js";
+import { handleError, jsonOk, readJsonBody, withService } from "../../../../../src/dashboard/http.js";
 
 export const dynamic = "force-dynamic";
 

@@ -86,6 +86,8 @@ export function testConfig(overrides: {
       migrationsDir: overrides.migrationsDir ?? "",
       requirePersistence: overrides.requirePersistence ?? true,
     },
+    configFilePath: "",
+    configFile: { version: 1, models: {}, catalog: [], roles: [] },
   };
 }
 

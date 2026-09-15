@@ -15,9 +15,15 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { loadConfig, type AppConfig } from "../config/env.js";
+import { resolveConfigPath } from "../config/config-file.js";
 import { createLogger, type Logger } from "../domain/logger.js";
 import { createPersistence, loadPglite, type Persistence } from "../persistence/container.js";
 import { createDashboardService, type DashboardService } from "./service.js";
+import {
+  createConfigService,
+  type ConfigService,
+  type EffectiveConfig,
+} from "./config-service.js";
 import type { TaskSpec } from "../domain/types.js";
 import type { TaskRecord } from "../persistence/repositories/task-repository.js";
 import { createRuntime as createOrchestrationRuntime } from "../orchestration/container.js";
@@ -34,6 +40,18 @@ export interface DashboardRuntime {
   persistence?: Persistence;
   hub: RealtimeHub;
   service?: DashboardService;
+  /** Phase V2.1: read/validate/write the JSON config file. Always present. */
+  configService: ConfigService;
+  /**
+   * Phase V2.1: re-reads the config file and swaps the in-memory `AppConfig` so
+   * a change saved in the dashboard takes effect for the next run WITHOUT a
+   * server restart. Returns the reloaded config.
+   *
+   * Honest limitation: this only affects THIS process. A separately launched
+   * worker reads the file at its own startup and must be restarted (or call this
+   * itself) to see a change.
+   */
+  reloadConfig(): AppConfig;
   sweeper?: StaleSweeper;
   workflowScheduler?: import("../orchestration/workflow-scheduler.js").WorkflowScheduler;
   /** Populated when the runtime could not be built. */
@@ -87,12 +105,23 @@ export async function createDashboardRuntime(options: DashboardRuntimeOptions): 
         }),
     });
 
+  // --- V2.1: config service + in-memory reload -------------------------------
+  // One implementation, shared with the unconfigured path in `build()` via
+  // `createConfigPlumbing`. The config file wins for models/roles, so `envModels`
+  // is only a fallback used when a stage is unset in both file and environment.
+  const plumbing = createConfigPlumbing(config, logger);
+  const { configService, reloadConfig, currentConfig } = plumbing;
+
   if (!options.persistence) {
     return {
       configured: false,
-      config,
+      get config() {
+        return currentConfig();
+      },
       logger,
       hub,
+      configService,
+      reloadConfig,
       ...(options.error ? { error: options.error } : {}),
     };
   }
@@ -129,11 +158,19 @@ export async function createDashboardRuntime(options: DashboardRuntimeOptions): 
 
   return {
     configured: true,
-    config,
+    // Exposed as a getter so a reload is visible to later readers without
+    // rebuilding the runtime. The closures above (service, worker) captured the
+    // boot-time values deliberately: an in-flight run keeps the profile it
+    // started with, which is the correct audit behaviour.
+    get config() {
+      return currentConfig();
+    },
     logger,
     persistence,
     hub,
     service,
+    configService,
+    reloadConfig,
     ...(control.worker ? { worker: control.worker } : {}),
     ...(control.recovery ? { recovery: control.recovery } : {}),
     ...("sweeper" in control && control.sweeper ? { sweeper: control.sweeper } : {}),
@@ -290,6 +327,61 @@ interface GlobalCache {
 
 const cache = globalThis as unknown as GlobalCache;
 
+/**
+ * Builds the V2.1 config plumbing (service + in-memory reload) for a runtime.
+ *
+ * Extracted so the unconfigured paths (no database) still expose a working
+ * config service: editing models/roles does not require a database, and the
+ * Settings page must function even when persistence is disabled.
+ */
+function createConfigPlumbing(
+  bootConfig: AppConfig,
+  logger: Logger,
+): { configService: ConfigService; reloadConfig(): AppConfig; currentConfig(): AppConfig } {
+  let liveConfig = bootConfig;
+  const envModels = {
+    coder: bootConfig.coder.model,
+    reviewer: bootConfig.reviewer.model,
+    planner: bootConfig.planner.model,
+  };
+
+  const currentConfig = (): AppConfig => liveConfig;
+
+  const effective = (): EffectiveConfig => ({
+    models: {
+      coder: liveConfig.configFile.models.coder ?? liveConfig.coder.model,
+      reviewer: liveConfig.configFile.models.reviewer ?? liveConfig.reviewer.model,
+      planner: liveConfig.configFile.models.planner ?? liveConfig.planner.model,
+    },
+    agentProfiles: [liveConfig.coder.agentProfile, liveConfig.reviewer.agentProfile],
+    modelProfiles: [liveConfig.coder.modelProfile, liveConfig.reviewer.modelProfile],
+  });
+
+  const configService = createConfigService({
+    path: bootConfig.configFilePath,
+    logger,
+    envModels,
+    current: effective,
+  });
+
+  const reloadConfig = (): AppConfig => {
+    const reloaded = loadConfig({
+      cwd: process.cwd(),
+      loadDotEnv: true,
+      configPath: liveConfig.configFilePath,
+    });
+    liveConfig = reloaded;
+    logger.info("dashboard.config_reloaded", {
+      path: reloaded.configFilePath,
+      coder: reloaded.coder.model,
+      reviewer: reloaded.reviewer.model,
+    });
+    return reloaded;
+  };
+
+  return { configService, reloadConfig, currentConfig };
+}
+
 async function build(): Promise<DashboardRuntime> {
   const cwd = process.cwd();
   const config = loadConfig({ cwd, loadDotEnv: true });
@@ -298,6 +390,8 @@ async function build(): Promise<DashboardRuntime> {
     format: config.logging.format,
     base: { service: "ai-team-dashboard" },
   });
+
+  const plumbing = createConfigPlumbing(config, logger);
 
   const hub = createRealtimeHub({
     onError: (failure) =>
@@ -312,7 +406,7 @@ async function build(): Promise<DashboardRuntime> {
     logger.warn("dashboard.no_database", {
       note: "Neither DATABASE_URL nor PGLITE_DATA_DIR is set — the dashboard will report 'not configured' instead of showing data",
     });
-    return { configured: false, config, logger, hub };
+    return { configured: false, config, logger, hub, ...plumbing };
   }
 
   try {
@@ -333,7 +427,14 @@ async function build(): Promise<DashboardRuntime> {
     });
 
     if (!persistence) {
-      return { configured: false, config, logger, hub, error: "persistence unavailable" };
+      return {
+        configured: false,
+        config,
+        logger,
+        hub,
+        ...plumbing,
+        error: "persistence unavailable",
+      };
     }
 
     const runtime = createDashboardRuntime({ config, logger, persistence, hub });
@@ -348,7 +449,7 @@ async function build(): Promise<DashboardRuntime> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error("dashboard.persistence_failed", { error: message });
-    return { configured: false, config, logger, hub, error: message };
+    return { configured: false, config, logger, hub, ...plumbing, error: message };
   }
 }
 

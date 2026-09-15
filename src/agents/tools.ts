@@ -61,6 +61,22 @@ export interface CommandRunnerOptions {
 export const DEFAULT_COMMAND_TIMEOUT_MS = 180_000;
 const DEFAULT_MAX_OUTPUT_CHARS = 12_000;
 
+/**
+ * The names of the tools the coder can actually use.
+ *
+ * Single source of truth for the V2.1 Settings UI's tool-policy editor: it must
+ * offer exactly these, so an operator can never select a tool that does not
+ * exist. Note `search_files` is NOT here — it appears in the static coder
+ * profile's `allowedTools` but no such tool is registered. Because the agent
+ * filters the real tool list by the allow-list, that extra name is currently
+ * inert (it matches nothing); it is a pre-existing inconsistency flagged for a
+ * separate cleanup, and offering it in the UI would be misleading.
+ */
+export const CODER_TOOL_NAMES = ["list_files", "read_file", "write_file", "run_command"] as const;
+
+export type CoderToolName = (typeof CODER_TOOL_NAMES)[number];
+
+
 export class CommandRunner {
   private readonly timeoutMs: number;
   private readonly maxOutputChars: number;

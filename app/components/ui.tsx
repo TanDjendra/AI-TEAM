@@ -118,6 +118,72 @@ export function Button({ className, variant, size, asChild = false, ...props }: 
   return <Component className={cn(buttonVariants({ variant, size }), className)} {...props} />;
 }
 
+// --- Form primitives (Phase V2.1) -------------------------------------------
+
+const FIELD_BASE =
+  "w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface)] px-2.5 py-1.5 " +
+  "text-xs text-[var(--content)] placeholder:text-[var(--content-faint)] " +
+  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 " +
+  "focus-visible:outline-[var(--coder)] disabled:opacity-50";
+
+export interface InputProps extends React.ComponentProps<"input"> {
+  invalid?: boolean;
+}
+
+export function Input({ className, invalid, ...props }: InputProps) {
+  return (
+    <input
+      className={cn(FIELD_BASE, invalid ? "border-[var(--danger)]" : "", className)}
+      aria-invalid={invalid ? true : undefined}
+      {...props}
+    />
+  );
+}
+
+export interface TextareaProps extends React.ComponentProps<"textarea"> {
+  invalid?: boolean;
+}
+
+export function Textarea({ className, invalid, ...props }: TextareaProps) {
+  return (
+    <textarea
+      className={cn(FIELD_BASE, "font-mono leading-relaxed", invalid ? "border-[var(--danger)]" : "", className)}
+      aria-invalid={invalid ? true : undefined}
+      {...props}
+    />
+  );
+}
+
+export interface SelectProps extends React.ComponentProps<"select"> {
+  invalid?: boolean;
+}
+
+export function Select({ className, invalid, children, ...props }: SelectProps) {
+  return (
+    <select
+      className={cn(FIELD_BASE, "pr-6", invalid ? "border-[var(--danger)]" : "", className)}
+      aria-invalid={invalid ? true : undefined}
+      {...props}
+    >
+      {children}
+    </select>
+  );
+}
+
+export function Label({ className, ...props }: React.ComponentProps<"label">) {
+  return (
+    <label
+      className={cn("text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--content-faint)]", className)}
+      {...props}
+    />
+  );
+}
+
+export function FieldError({ children }: { children?: React.ReactNode }) {
+  if (!children) return null;
+  return <p className="mt-1 text-[11px] text-[var(--danger)]">{children}</p>;
+}
+
 // --- Layout helpers ---------------------------------------------------------
 
 export function Stat({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {

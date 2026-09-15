@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "models": {
+    "coder": "grib/glm-5.3-flash",
+    "reviewer": "grip/gpt-5.6-luna",
+    "planner": "grip/deepseek-v4.1-flash"
+  },
+  "catalog": [],
+  "roles": []
+}

@@ -299,8 +299,19 @@ export interface ModelProfile {
   };
 }
 
+/**
+ * A role identifier for an agent profile.
+ *
+ * V2.0 modelled this as the closed union "coder" | "reviewer" | "planner", since
+ * only those three existed. V2.1 introduces owner-defined custom roles
+ * (e.g. "frontend-coder", "security-reviewer"), so the type is widened to a
+ * string. The three built-ins remain the only roles the orchestrator's pipeline
+ * dispatches today; custom roles are stored/validated but not yet executed.
+ */
+export type AgentRoleId = string;
+
 export interface AgentProfile {
-  readonly role: "coder" | "reviewer" | "planner";
+  readonly role: AgentRoleId;
   readonly defaultModelId: string;
   readonly systemPromptTemplate: string;
   readonly allowedTools?: readonly string[];

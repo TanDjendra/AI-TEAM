@@ -13,8 +13,14 @@ import { join } from "node:path";
 
 import { isLogLevel, type LogFormat, type LogLevel } from "../domain/logger.js";
 import type { AgentProfile, ModelProfile } from "../domain/types.js";
-import { getAgentProfile } from "./agent-profiles.js";
-import { getModelProfile, synthesizeModelProfile } from "./model-profiles.js";
+import { getAgentProfile, resolveAgentProfiles } from "./agent-profiles.js";
+import { getModelProfile, resolveModelProfiles, synthesizeModelProfile } from "./model-profiles.js";
+import {
+  ConfigFileError,
+  readConfigFile,
+  resolveConfigPath,
+  type AiTeamConfigFile,
+} from "./config-file.js";
 
 export interface CoderConfig {
   model: string;
@@ -92,6 +98,16 @@ export interface AppConfig {
   orchestrator: OrchestratorConfig;
   logging: LoggingConfig;
   database: DatabaseConfig;
+  /**
+   * Absolute path of the JSON config file this configuration was resolved with
+   * (Phase V2.1). The dashboard shows it so the operator knows what a save edits.
+   */
+  configFilePath: string;
+  /**
+   * The validated JSON document, kept so the config service can diff a proposed
+   * change against what is actually loaded.
+   */
+  configFile: AiTeamConfigFile;
 }
 
 export interface DatabaseConfig {
@@ -141,6 +157,11 @@ export interface LoadConfigOptions {
   cwd?: string;
   /** Load `<cwd>/.env` (default true). Real environment always takes precedence. */
   loadDotEnv?: boolean;
+  /**
+   * Explicit JSON config file path (Phase V2.1). Defaults to resolving
+   * `AI_TEAM_CONFIG_PATH` then `<cwd>/ai-team.config.json`.
+   */
+  configPath?: string;
 }
 
 const DEFAULT_BASE_URL = "http://localhost:20128/v1";
@@ -245,6 +266,28 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
 
   const errors: string[] = [];
 
+  // --- V2.1: JSON config file ------------------------------------------------
+  // Read once. A broken file is a hard error: silently falling back to defaults
+  // would show the operator a working dashboard while their saved edits are not
+  // actually in force, which is the exact confusion V2.1 exists to remove.
+  const configFilePath = options.configPath ?? resolveConfigPath(processEnv, cwd);
+  let configFile: AiTeamConfigFile;
+  try {
+    configFile = readConfigFile(configFilePath);
+  } catch (error) {
+    if (error instanceof ConfigFileError) {
+      throw error;
+    }
+    throw new ConfigFileError(
+      `Could not load the configuration file: ${error instanceof Error ? error.message : String(error)}`,
+      { filePath: configFilePath },
+    );
+  }
+
+  // Effective profiles: built-in defaults overlaid with the JSON document.
+  const agentProfiles = resolveAgentProfiles(configFile.roles);
+  const modelProfiles = resolveModelProfiles(configFile.catalog);
+
   const baseUrl = (env.ROUTER_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
   try {
     const parsed = new URL(baseUrl);
@@ -258,9 +301,12 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   const explicitReviewerModel = env.REVIEWER_MODEL?.trim();
   const explicitPlannerModel = env.PLANNER_MODEL?.trim();
 
-  const coderModel = explicitCoderModel;
-  const reviewerModel = explicitReviewerModel;
-  const plannerModel = explicitPlannerModel || coderModel;
+  // Precedence (V2.1 decision): the JSON file WINS for models and roles, so a
+  // change saved in the dashboard actually takes effect. The environment is the
+  // fallback and remains authoritative for secrets (see `router` below).
+  const coderModel = configFile.models.coder ?? explicitCoderModel;
+  const reviewerModel = configFile.models.reviewer ?? explicitReviewerModel;
+  const plannerModel = configFile.models.planner ?? explicitPlannerModel ?? coderModel;
 
   if (!coderModel) errors.push("CODER_MODEL is required (e.g. grip/deepseek-v4.1-flash)");
   if (!reviewerModel) errors.push("REVIEWER_MODEL is required (e.g. grip/gpt-5.6-luna)");
@@ -350,13 +396,17 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     },
     coder: {
       model: coderModel as string,
-      agentProfile: getAgentProfile("coder"),
-      modelProfile: getModelProfile(coderModel as string) ?? synthesizeModelProfile(coderModel as string, baseContextWindow),
+      agentProfile: getAgentProfile("coder", agentProfiles),
+      modelProfile:
+        getModelProfile(coderModel as string, modelProfiles) ??
+        synthesizeModelProfile(coderModel as string, baseContextWindow),
     },
     reviewer: {
       model: reviewerModel as string,
-      agentProfile: getAgentProfile("reviewer"),
-      modelProfile: getModelProfile(reviewerModel as string) ?? synthesizeModelProfile(reviewerModel as string, baseContextWindow),
+      agentProfile: getAgentProfile("reviewer", agentProfiles),
+      modelProfile:
+        getModelProfile(reviewerModel as string, modelProfiles) ??
+        synthesizeModelProfile(reviewerModel as string, baseContextWindow),
     },
     planner: {
       model: plannerModel as string,
@@ -415,6 +465,8 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
       migrationsDir: env.DATABASE_MIGRATIONS_DIR?.trim() || join(cwd, "supabase", "migrations"),
       requirePersistence: bool(env.DATABASE_REQUIRE_PERSISTENCE, true),
     },
+    configFilePath,
+    configFile,
   };
 }
 
@@ -430,6 +482,9 @@ export function describeConfig(config: AppConfig): Record<string, string | numbe
     "coder.model": config.coder.model,
     "reviewer.model": config.reviewer.model,
     "planner.model": config.planner.model,
+    "config.path": config.configFilePath,
+    "config.customRoles": config.configFile.roles.length,
+    "config.catalogEntries": config.configFile.catalog.length,
     "orchestrator.maxReviewCycles": config.orchestrator.maxReviewCycles,
     "orchestrator.maxAgentAttempts": config.orchestrator.maxAgentAttempts,
     "orchestrator.staleRunThresholdMs": config.orchestrator.staleRunThresholdMs,

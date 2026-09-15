@@ -64,7 +64,7 @@ export function IntegrationBoard({ candidates, now, onRefresh }: IntegrationBoar
             <PanelHeader>
               <div className="flex items-center gap-2">
                 <PanelTitle className="truncate">Merge Gate</PanelTitle>
-                <Badge tone={candidate.status === "PENDING_REVIEW" ? "warn" : candidate.status === "APPROVED" ? "ok" : "danger"}>
+                <Badge tone={candidate.status === "PENDING" ? "warn" : candidate.status === "APPROVED" ? "ok" : "danger"}>
                   {candidate.status}
                 </Badge>
               </div>
@@ -73,11 +73,11 @@ export function IntegrationBoard({ candidates, now, onRefresh }: IntegrationBoar
               <div className="space-y-3">
                 <Stat label="Workspace Node" value={<Mono>{candidate.nodeId}</Mono>} />
                 <div className="text-xs text-[var(--content)]">
-                  <strong>Diff Summary:</strong> {candidate.summary}
+                  <strong>Diff Summary:</strong> {candidate.diffSummary}
                 </div>
               </div>
               
-              {candidate.status === "PENDING_REVIEW" && (
+              {candidate.status === "PENDING" && (
                 <div className="flex gap-2 justify-end mt-4">
                   <Button
                     variant="danger"
