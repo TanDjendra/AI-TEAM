@@ -1,9 +1,12 @@
 {
   "name": "ai-team-orchestrator",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "description": "AI Team Orchestrator - Coder/Reviewer agent pipeline over 9Router with a bounded review loop.",
+  "bin": {
+    "aiteam": "./dist/cli/product-cli.js"
+  },
   "engines": {
     "node": ">=20.11"
   },
@@ -14,6 +17,7 @@
     "test:watch": "vitest",
     "test:live": "vitest run tests/live",
     "task": "tsx src/cli.ts",
+    "aiteam": "tsx src/cli/product-cli.ts",
     "router:check": "tsx src/cli.ts --check-router",
     "db:check": "tsx src/cli.ts --check-db",
     "verify": "npm run typecheck && npm run test",
