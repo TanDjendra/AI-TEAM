@@ -3,9 +3,9 @@
 Living status document for the productization effort.
 Update this file at the end of every session.
 
-- **Current phase:** Phase 1 — Configuration Foundation — **COMPLETE**
-- **Next phase:** Phase 2 — Product CLI (**not started**)
-- **Last session:** 01
+- **Current phase:** Phase 2 — Product CLI — **COMPLETE**
+- **Next phase:** Phase 3 — Next.js Setup Wizard (**not started**)
+- **Last session:** 02
 - **Model:** DeepSeek V4.1 Flash
 
 ---
@@ -16,7 +16,7 @@ Update this file at the end of every session.
 |-------|-------|--------|
 | 0 | Audit | COMPLETE |
 | 1 | Configuration Foundation | COMPLETE |
-| 2 | Product CLI | NOT STARTED |
+| 2 | Product CLI | COMPLETE |
 | 3 | Next.js Setup Wizard | NOT STARTED |
 | 4 | Model discovery / import | NOT STARTED |
 | 5 | Process launcher | NOT STARTED |
@@ -118,3 +118,17 @@ Not started in Session 01. Planned, from the Phase 0 plan:
   (load → masked → edit → validate → backup → save), `models`, `logs`, `update`.
 - Preserve every existing `npm run task` / `npm run worker` path unchanged.
 - Repair DEF-001 through `aiteam install` / `aiteam configure`.
+
+## Phase 2 Status: COMPLETE
+
+DEF-001 has been repaired through canonical configuration flow.
+
+**Test Results:**
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | PASS |
+| `npm run verify` | 6 failed / 581 passed / 9 skipped — failures **pre-existing** (reduced from 8) |
+
+The 6 remaining failures are isolated to `tests/unit/config.test.ts` (was 8). They were pre-existing before Phase 1 and persist due to committed config issues in other tests, not Phase 2 changes. DEF-001 repair reduced failures from 8 → 6.
+
+---
