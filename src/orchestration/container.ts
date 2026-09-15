@@ -15,7 +15,8 @@ import { ReviewerAgent } from "../agents/reviewer-agent.js";
 import { CommandRunner } from "../agents/tools.js";
 import { Workspace } from "../agents/workspace.js";
 import { DefaultBudgetAuthorizer, NoopBudgetAuthorizer } from "../services/budget-authorizer.js";
-import { GitWorkspaceResolver, DirectoryWorkspaceResolver } from "../infrastructure/workspace-resolver.js";
+import { ExecutionWorkspaceResolver } from "./execution-workspace.js";
+import { GitWorktreeManager } from "./git-worktree-manager.js";
 import { createLogger, type Logger } from "../domain/logger.js";
 import type { Agent } from "../domain/types.js";
 import type { ModelProvider } from "../providers/model-provider.js";
@@ -24,6 +25,10 @@ import { RouterProvider } from "../providers/router-provider.js";
 import { OrchestratorService, CODER_AGENT_KEY, REVIEWER_AGENT_KEY } from "./runner.js";
 import { createPersistenceHooks } from "./persistence-hooks.js";
 import { createPersistence, loadPglite, type Persistence } from "../persistence/container.js";
+import { SingleProcessWorker, type TaskWorker } from "./worker.js";
+import { WorkflowScheduler } from "./workflow-scheduler.js";
+import { WorkflowPlanner } from "./workflow-planner.js";
+import { IntegrationCoordinator } from "./integration-coordinator.js";
 
 export interface RuntimeOptions {
   /** Defaults to process.cwd(). */
@@ -55,6 +60,10 @@ export interface Runtime {
   orchestrator: OrchestratorService;
   /** Present only when a database is configured. */
   persistence?: Persistence;
+  worker?: TaskWorker;
+  scheduler?: WorkflowScheduler;
+  planner?: WorkflowPlanner;
+  integrationCoordinator?: IntegrationCoordinator;
   /** Resolves (and creates) the sandbox for a task slug. */
   resolveWorkspace(slug: string): Workspace;
   /** Verifies that both configured models are actually served by the router. */
@@ -175,9 +184,11 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Runti
         authorizer,
       });
     },
-    workspaceResolver: config.orchestrator.gitWorkspaceEnabled
-      ? new GitWorkspaceResolver(config.orchestrator.workspaceRoot, logger)
-      : new DirectoryWorkspaceResolver(config.orchestrator.workspaceRoot, logger),
+    workspaceResolver: new ExecutionWorkspaceResolver(
+      config.orchestrator.workspaceRoot,
+      logger,
+      config.orchestrator.gitWorkspaceEnabled ? new GitWorktreeManager(config.orchestrator.workspaceRoot, logger) : undefined
+    ),
     ...(hooksFactory ? { hooksFactory } : {}),
     ...(persistence
       ? {
@@ -258,17 +269,59 @@ export async function createRuntime(options: RuntimeOptions = {}): Promise<Runti
     }
   }
 
+  let worker: TaskWorker | undefined;
+  let scheduler: WorkflowScheduler | undefined;
+  let integrationCoordinator: IntegrationCoordinator | undefined;
+  
+  if (persistence) {
+    worker = new SingleProcessWorker({
+      persistence,
+      orchestrator,
+      logger,
+      // Optional: checkInterrupt and interruptWatcherFor can be wired if needed,
+      // but for V2-08 baseline, we can use the defaults.
+    });
+
+    let integrationCoordinator: IntegrationCoordinator | undefined;
+    if (persistence.integrationCandidates) {
+      integrationCoordinator = new IntegrationCoordinator(
+        config.orchestrator.workspaceRoot,
+        persistence.integrationCandidates,
+        persistence.bus,
+        logger
+      );
+    }
+
+    scheduler = new WorkflowScheduler({
+      persistence,
+      worker,
+      logger,
+      integrationCoordinator,
+    });
+  }
+
+  const planner = new WorkflowPlanner({
+    modelProvider: provider,
+    modelId: config.planner.model,
+  });
+
   return {
     config,
     logger,
     provider,
     orchestrator,
     ...(persistence ? { persistence } : {}),
+    ...(worker ? { worker } : {}),
+    ...(scheduler ? { scheduler } : {}),
+    ...(integrationCoordinator ? { integrationCoordinator } : {}),
+    planner,
     resolveWorkspace,
     verifyModels,
     verifyCredentials,
     close: async () => {
       workspaceCache.clear();
+      await scheduler?.stop();
+      await worker?.shutdown();
       await persistence?.close();
     },
   };

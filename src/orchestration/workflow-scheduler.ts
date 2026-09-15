@@ -3,6 +3,7 @@ import type { Persistence } from "../persistence/container.js";
 import type { TaskWorker } from "./worker.js";
 import type { TaskRecord } from "../domain/types.js";
 import { WorkerPool } from "./worker-pool.js";
+import type { IntegrationCoordinator } from "./integration-coordinator.js";
 
 export interface WorkflowSchedulerOptions {
   persistence: Persistence;
@@ -11,6 +12,7 @@ export interface WorkflowSchedulerOptions {
   pollIntervalMs?: number;
   /** Phase V2-08: maximum concurrent workflow nodes (default 4). */
   workerPoolSize?: number;
+  integrationCoordinator?: IntegrationCoordinator;
 }
 
 export class WorkflowScheduler {
@@ -19,12 +21,14 @@ export class WorkflowScheduler {
   private readonly logger: Logger;
   private readonly pool: WorkerPool;
   private readonly workerPoolSize: number;
+  private readonly integrationCoordinator?: IntegrationCoordinator;
 
   constructor(options: WorkflowSchedulerOptions) {
     this.persistence = options.persistence;
     this.worker = options.worker;
     this.logger = options.logger.child({ service: "workflow-scheduler" });
     this.workerPoolSize = Math.max(1, Math.min(16, options.workerPoolSize ?? 4));
+    this.integrationCoordinator = options.integrationCoordinator;
 
     const pollIntervalMs = Math.max(1000, options.pollIntervalMs ?? 2000);
 
@@ -145,6 +149,7 @@ export class WorkflowScheduler {
     try {
       // 1. Re-read the authoritative persisted task record.
       const persistedTask = await this.persistence.repositories.tasks.findByExternalId(inMemoryRecord.id);
+      console.log("onTaskFinished", { inMemoryRecordId: inMemoryRecord.id, persistedTask });
       if (!persistedTask) {
         this.logger.error("scheduler.task_not_found", { taskId: inMemoryRecord.id });
         return;
@@ -156,7 +161,36 @@ export class WorkflowScheduler {
 
       if (persistedTask.status === "DONE") {
         if (persistedTask.approved) {
-          finalStatus = "SUCCEEDED";
+          // Check if it requires a merge
+          const allocs = await this.persistence.db.query<{ mode: string, branchName: string }>(
+            "SELECT mode, branch_name as \"branchName\" FROM workspace_allocations WHERE task_id = $1 LIMIT 1",
+            [persistedTask.id]
+          );
+
+          if (allocs.length > 0 && allocs[0]?.mode === "GIT_WORKTREE") {
+            if (this.integrationCoordinator) {
+              try {
+                await this.integrationCoordinator.proposeMerge(
+                  workflowId,
+                  nodeKey,
+                  allocs[0].branchName,
+                  "HEAD"
+                );
+                // We pause execution of this node. It remains in RUNNING state or we can mark it BLOCKED.
+                // The blueprint says "pause execution". We'll just return early so the node stays RUNNING.
+                // A complete implementation would wait for INTEGRATION_MERGED to mark it SUCCEEDED.
+                this.logger.info("scheduler.merge_proposed_paused", { workflowId, nodeKey });
+                return;
+              } catch (e) {
+                blockReason = `Merge proposal failed: ${e instanceof Error ? e.message : String(e)}`;
+              }
+            } else {
+              // Proceed as normal if no coordinator is wired
+              finalStatus = "SUCCEEDED";
+            }
+          } else {
+            finalStatus = "SUCCEEDED";
+          }
         } else {
           blockReason = "Task was DONE but not approved.";
         }

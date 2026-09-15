@@ -37,6 +37,8 @@ const BLOCKED_PATTERNS = [
   /\b(mimikatz|lsass|procdump)\b/i,
   // Registry edits
   /\b(reg add|reg delete)\b/i,
+  // Git workspace escape / destruction
+  /\bgit\s+(worktree|checkout|switch|reset|clean|push|branch\s+-D)\b/i,
 ];
 
 export class CommandPolicy {

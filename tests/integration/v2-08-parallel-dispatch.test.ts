@@ -438,6 +438,7 @@ describe("V2-08 — WorkflowScheduler with WorkerPool (integration)", () => {
 
     const worker = new ControllableWorker();
     const mockPersistence = {
+      db: testDb.db,
       repositories: {
         workflows: testDb.workflows,
         workflowDependencies: testDb.workflowDependencies,
@@ -472,6 +473,7 @@ describe("V2-08 — WorkflowScheduler with WorkerPool (integration)", () => {
 
     const worker = new ControllableWorker();
     const mockPersistence = {
+      db: testDb.db,
       repositories: {
         workflows: testDb.workflows,
         workflowDependencies: testDb.workflowDependencies,

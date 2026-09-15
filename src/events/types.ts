@@ -57,6 +57,11 @@ export const TASK_EVENT_TYPES = [
   "WORKFLOW_NODE_SUCCEEDED",
   "WORKFLOW_NODE_BLOCKED",
   "WORKFLOW_NODE_CANCELLED",
+  // Phase V2-10: Staging Integration Candidate events
+  "INTEGRATION_PROPOSED",
+  "INTEGRATION_APPROVED",
+  "INTEGRATION_REJECTED",
+  "INTEGRATION_MERGED",
 ] as const;
 
 export type TaskEventType = (typeof TASK_EVENT_TYPES)[number];
@@ -341,6 +346,32 @@ export interface TaskEventPayloadMap {
     workflowId: string;
     nodeKey: string;
     reason: string;
+  };
+
+  // ── Phase V2-10: Integration Candidate events ───────────────────────────
+
+  INTEGRATION_PROPOSED: {
+    integrationId: string;
+    workflowId: string;
+    nodeKey: string;
+    sourceBranch: string;
+    targetBranch: string;
+  };
+
+  INTEGRATION_APPROVED: {
+    integrationId: string;
+    actor: "human";
+  };
+
+  INTEGRATION_REJECTED: {
+    integrationId: string;
+    actor: "human";
+    reason?: string;
+  };
+
+  INTEGRATION_MERGED: {
+    integrationId: string;
+    workflowId: string;
   };
 }
 

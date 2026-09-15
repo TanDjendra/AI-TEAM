@@ -59,6 +59,7 @@ export interface DashboardRuntimeOptions {
     loadSpec?(task: TaskRecord): Promise<TaskSpec>;
     staleThresholdMs?: number;
     plannerAgent?: import("../agents/planner-agent.js").PlannerAgent;
+    integrationCoordinator?: import("../orchestration/integration-coordinator.js").IntegrationCoordinator;
   };
 }
 
@@ -120,6 +121,7 @@ export async function createDashboardRuntime(options: DashboardRuntimeOptions): 
     workspaceRoot: config.orchestrator.workspaceRoot || join(process.cwd(), "workspace"),
     ...(control.worker ? { worker: control.worker } : {}),
     ...(control.plannerAgent ? { plannerAgent: control.plannerAgent } : {}),
+    ...(control.integrationCoordinator ? { integrationCoordinator: control.integrationCoordinator } : {}),
     ...(control.recovery ? { recovery: control.recovery } : {}),
     loadSpec: control.loadSpec,
     staleThresholdMs: control.staleThresholdMs,
@@ -160,6 +162,7 @@ async function buildControl(
   sweeper?: StaleSweeper;
   workflowScheduler?: import("../orchestration/workflow-scheduler.js").WorkflowScheduler;
   plannerAgent?: import("../agents/planner-agent.js").PlannerAgent;
+  integrationCoordinator?: import("../orchestration/integration-coordinator.js").IntegrationCoordinator;
   loadSpec: (task: TaskRecord) => Promise<TaskSpec>;
   staleThresholdMs: number;
 }> {
@@ -200,8 +203,10 @@ async function buildControl(
 
   let worker: TaskWorker | undefined;
   let plannerAgent: import("../agents/planner-agent.js").PlannerAgent | undefined;
+  let integrationCoordinator: import("../orchestration/integration-coordinator.js").IntegrationCoordinator | undefined;
   try {
     const runtime = await createOrchestrationRuntime({ existingPersistence: persistence });
+    integrationCoordinator = runtime.integrationCoordinator;
     worker = new SingleProcessWorker({
       persistence,
       logger,
@@ -249,6 +254,7 @@ async function buildControl(
   return {
     ...(worker ? { worker } : {}),
     ...(plannerAgent ? { plannerAgent } : {}),
+    ...(integrationCoordinator ? { integrationCoordinator } : {}),
     recovery,
     sweeper,
     ...(workflowScheduler ? { workflowScheduler } : {}),

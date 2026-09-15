@@ -306,3 +306,23 @@ export interface AgentProfile {
   readonly allowedTools?: readonly string[];
 }
 
+// ---------------------------------------------------------------------------
+// Workspace Allocations (Phase V2-07)
+// ---------------------------------------------------------------------------
+
+export type WorkspaceAllocationMode = "DIRECTORY" | "GIT_WORKTREE";
+export type WorkspaceAllocationStatus = "ALLOCATED" | "CLEANED" | "FAILED_CLEANUP";
+
+export interface WorkspaceAllocation {
+  readonly id: string;
+  readonly taskId?: string;
+  readonly mode: WorkspaceAllocationMode;
+  readonly workspaceRoot: string;
+  readonly baseRef: string;
+  readonly branchName?: string;
+  readonly ownershipToken: string;
+  readonly status: WorkspaceAllocationStatus;
+  readonly createdAt: string;
+  readonly cleanedAt?: string;
+}
+

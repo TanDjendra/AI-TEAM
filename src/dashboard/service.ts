@@ -113,6 +113,7 @@ export interface TaskDetailView {
 
 export type WorkflowView = WorkflowRecord;
 export type WorkflowNodeView = WorkflowNodeRecord;
+export type IntegrationCandidateView = import("../domain/integration.js").IntegrationCandidate;
 
 export interface RunView {
   id: string;
@@ -242,6 +243,7 @@ export interface DashboardService {
   getWorkflow(id: string): Promise<WorkflowView | undefined>;
   getWorkflowNodes(workflowId: string): Promise<WorkflowNodeView[]>;
   getWorkflowArtifacts(workflowId: string): Promise<unknown[]>;
+  listIntegrationCandidates(): Promise<IntegrationCandidateView[]>;
   
   /** Read-only stale scan for the dashboard banner. */
   recoveryReport(): Promise<{ staleCount: number; thresholdSeconds: number; taskIds: string[] }>;
@@ -262,6 +264,8 @@ export interface DashboardService {
   cancelTask(id: string, reason?: string): Promise<ControlOutcome>;
   retryTask(id: string, reason?: string): Promise<ControlOutcome>;
   approveTask(id: string, reason?: string): Promise<ControlOutcome>;
+  approveIntegration(id: string): Promise<void>;
+  rejectIntegration(id: string, reason?: string): Promise<void>;
 }
 
 export interface DashboardServiceOptions {
@@ -273,6 +277,7 @@ export interface DashboardServiceOptions {
   /** Real task execution + cooperative interrupts. Absent = control is refused. */
   worker?: TaskWorker;
   plannerAgent?: import("../agents/planner-agent.js").PlannerAgent;
+  integrationCoordinator?: import("../orchestration/integration-coordinator.js").IntegrationCoordinator;
   /** Stale detection / crash recovery. */
   recovery?: RecoveryService;
   /** Resolves the spec to run a task (task file, then the stored row). */
@@ -1280,14 +1285,33 @@ export function createDashboardService(options: DashboardServiceOptions): Dashbo
       return (await persistence.workflows.findById(id)) ?? undefined;
     },
 
-    async getWorkflowNodes(workflowId: string) {
+    async getWorkflowNodes(workflowId: string): Promise<WorkflowNodeView[]> {
       if (!persistence.workflows) return [];
-      return persistence.workflows.findNodes(workflowId);
+      return persistence.workflows.findNodes(workflowId) as Promise<WorkflowNodeView[]>;
     },
 
-    async getWorkflowArtifacts(workflowId: string) {
+    async getWorkflowArtifacts(workflowId: string): Promise<unknown[]> {
       if (!persistence.workflowArtifacts) return [];
       return persistence.workflowArtifacts.findAll(workflowId);
+    },
+
+    async listIntegrationCandidates(): Promise<IntegrationCandidateView[]> {
+      if (!persistence.integrationCandidates) return [];
+      return persistence.integrationCandidates.list({ limit: 100 });
+    },
+
+    async approveIntegration(id: string): Promise<void> {
+      if (!options.integrationCoordinator) {
+        throw new ServiceError("IntegrationCoordinator is not initialized.", { status: 503 });
+      }
+      await options.integrationCoordinator.approve(id);
+    },
+
+    async rejectIntegration(id: string, reason?: string): Promise<void> {
+      if (!options.integrationCoordinator) {
+        throw new ServiceError("IntegrationCoordinator is not initialized.", { status: 503 });
+      }
+      await options.integrationCoordinator.reject(id);
     },
 
     /** Stale scan for the banner. Read-only: never mutates. */

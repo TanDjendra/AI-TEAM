@@ -22,6 +22,10 @@ export interface CoderConfig {
   modelProfile: ModelProfile;
 }
 
+export interface PlannerConfig {
+  model: string;
+}
+
 export interface ReviewerConfig {
   model: string;
   agentProfile: AgentProfile;
@@ -84,6 +88,7 @@ export interface AppConfig {
   router: RouterConfig;
   coder: CoderConfig;
   reviewer: ReviewerConfig;
+  planner: PlannerConfig;
   orchestrator: OrchestratorConfig;
   logging: LoggingConfig;
   database: DatabaseConfig;
@@ -251,9 +256,11 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   }
   const explicitCoderModel = env.CODER_MODEL?.trim();
   const explicitReviewerModel = env.REVIEWER_MODEL?.trim();
+  const explicitPlannerModel = env.PLANNER_MODEL?.trim();
 
   const coderModel = explicitCoderModel;
   const reviewerModel = explicitReviewerModel;
+  const plannerModel = explicitPlannerModel || coderModel;
 
   if (!coderModel) errors.push("CODER_MODEL is required (e.g. grip/deepseek-v4.1-flash)");
   if (!reviewerModel) errors.push("REVIEWER_MODEL is required (e.g. grip/gpt-5.6-luna)");
@@ -351,6 +358,9 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
       agentProfile: getAgentProfile("reviewer"),
       modelProfile: getModelProfile(reviewerModel as string) ?? synthesizeModelProfile(reviewerModel as string, baseContextWindow),
     },
+    planner: {
+      model: plannerModel as string,
+    },
     orchestrator: {
       maxReviewCycles,
       maxAgentAttempts,
@@ -419,6 +429,7 @@ export function describeConfig(config: AppConfig): Record<string, string | numbe
     "router.verifyOnStart": config.router.verifyOnStart,
     "coder.model": config.coder.model,
     "reviewer.model": config.reviewer.model,
+    "planner.model": config.planner.model,
     "orchestrator.maxReviewCycles": config.orchestrator.maxReviewCycles,
     "orchestrator.maxAgentAttempts": config.orchestrator.maxAgentAttempts,
     "orchestrator.staleRunThresholdMs": config.orchestrator.staleRunThresholdMs,

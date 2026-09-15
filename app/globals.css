@@ -31,9 +31,9 @@
 
 :root {
   --surface: #ffffff;
-  --surface-raised: #f7f8fa;
+  --surface-raised: rgba(255, 255, 255, 0.7);
   --surface-sunken: #eef0f4;
-  --border-subtle: #e2e5ea;
+  --border-subtle: rgba(226, 229, 234, 0.5);
   --content: #14161a;
   --content-muted: #5c636e;
   --content-faint: #8a919c;
@@ -55,10 +55,10 @@
 }
 
 .dark {
-  --surface: #0d1017;
-  --surface-raised: #151a23;
-  --surface-sunken: #0a0d13;
-  --border-subtle: #232a36;
+  --surface: #0a0d13;
+  --surface-raised: rgba(21, 26, 35, 0.6);
+  --surface-sunken: #05070a;
+  --border-subtle: rgba(35, 42, 54, 0.5);
   --content: #e8ebf0;
   --content-muted: #9aa3b2;
   --content-faint: #6b7484;
@@ -88,6 +88,14 @@ body {
   background: var(--surface-sunken);
   color: var(--content);
   -webkit-font-smoothing: antialiased;
+  background-image: radial-gradient(circle at top right, rgba(37, 99, 235, 0.05), transparent 40%),
+                    radial-gradient(circle at bottom left, rgba(124, 58, 237, 0.05), transparent 40%);
+  background-attachment: fixed;
+}
+
+.dark body {
+  background-image: radial-gradient(circle at top right, rgba(96, 165, 250, 0.1), transparent 40%),
+                    radial-gradient(circle at bottom left, rgba(167, 139, 250, 0.1), transparent 40%);
 }
 
 /* A single utility used across panels so borders/backgrounds stay consistent. */
@@ -95,4 +103,11 @@ body {
   background: var(--surface-raised);
   border: 1px solid var(--border-subtle);
   border-radius: 0.625rem;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+}
+
+.dark @utility panel {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.1);
 }

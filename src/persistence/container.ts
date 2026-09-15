@@ -42,6 +42,7 @@ import { PostgresToolCallRepository } from "./repositories/tool-call-repository.
 import { PostgresWorkflowRepository } from "./repositories/workflow-repository.js";
 import { PostgresWorkflowDependencyRepository } from "./repositories/workflow-dependency-repository.js";
 import { PostgresWorkflowArtifactRepository } from "./repositories/workflow-artifact-repository.js";
+import { PostgresIntegrationCandidateRepository } from "./repositories/integration-repository.js";
 
 export interface PersistenceOptions {
   config: AppConfig;
@@ -102,6 +103,7 @@ export interface Persistence {
   workflows?: PostgresWorkflowRepository;
   workflowDeps?: PostgresWorkflowDependencyRepository;
   workflowArtifacts?: PostgresWorkflowArtifactRepository;
+  integrationCandidates?: PostgresIntegrationCandidateRepository;
   close(): Promise<void>;
 }
 
@@ -299,6 +301,9 @@ export async function createPersistence(
   const workflowArtifacts = config.orchestrator?.workflowEnabled
     ? new PostgresWorkflowArtifactRepository(db)
     : undefined;
+  const integrationCandidates = config.orchestrator?.workflowEnabled
+    ? new PostgresIntegrationCandidateRepository(db)
+    : undefined;
 
   return {
     db,
@@ -314,6 +319,7 @@ export async function createPersistence(
     workflows,
     workflowDeps,
     workflowArtifacts,
+    integrationCandidates,
     close: async () => {
       await bus.close();
       // When the caller supplied the db, they own its lifetime.

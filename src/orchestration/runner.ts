@@ -60,7 +60,7 @@ export interface OrchestratorOptions {
   createCoder(workspace: Workspace, observer: AgentObserver): Agent;
   createReviewer(workspace: Workspace, observer: AgentObserver): Agent;
   /** Resolver to abstract the workspace creation and cleanup (V2-07). */
-  workspaceResolver: import("../infrastructure/workspace-resolver.js").WorkspaceResolver;
+  workspaceResolver: import("./execution-workspace.js").WorkspaceResolver;
   /** Injectable clock for deterministic tests. */
   clock?: () => Date;
   /**
@@ -93,7 +93,7 @@ export class OrchestratorService {
   private readonly logger: Logger;
   private readonly createCoder: (workspace: Workspace, observer: AgentObserver) => Agent;
   private readonly createReviewer: (workspace: Workspace, observer: AgentObserver) => Agent;
-  private readonly workspaceResolver: import("../infrastructure/workspace-resolver.js").WorkspaceResolver;
+  private readonly workspaceResolver: import("./execution-workspace.js").WorkspaceResolver;
   private readonly clock: () => Date;
   private readonly hooksFactory?: () => OrchestratorHooks;
   private readonly completionBlocker?: () => string | undefined;
@@ -414,7 +414,7 @@ export class OrchestratorService {
       await hooks.onFailed?.({ stopReason: reason, message });
     } finally {
       // V2-07: GUARANTEED CLEANUP. Executes on success, error, TaskInterruptError (Pause/Cancel)
-      await this.workspaceResolver.cleanup(spec, workspacePath).catch(err => {
+      await this.workspaceResolver.cleanup(spec, workspacePath).catch((err: any) => {
         log.error("workspace.cleanup_failed", { error: err instanceof Error ? err.message : String(err) });
       });
     }

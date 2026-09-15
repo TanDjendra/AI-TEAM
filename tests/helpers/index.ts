@@ -61,6 +61,9 @@ export function testConfig(overrides: {
       agentProfile: getAgentProfile("reviewer"),
       modelProfile: getModelProfile("grip/gpt-5.6-luna") ?? synthesizeModelProfile("grip/gpt-5.6-luna", 128_000),
     },
+    planner: {
+      model: "grip/gpt-5.6-luna",
+    },
     orchestrator: {
       maxReviewCycles: overrides.maxReviewCycles ?? 3,
       maxAgentAttempts: overrides.maxAgentAttempts ?? 2,

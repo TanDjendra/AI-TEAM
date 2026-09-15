@@ -44,13 +44,15 @@ async function main() {
     modelProvider: runtime.provider,
   });
 
+  const testWorkspace = resolve(join(cwd, "workspace", "benchmark-real"));
+
   const service = createDashboardService({
     persistence: runtime.persistence!,
-    provider: runtime.provider,
+    logger,
+    router: { baseUrl: "", coderModel: "", reviewerModel: "" },
+    workspaceRoot: testWorkspace,
     plannerAgent,
-    logger
   });
-  const testWorkspace = resolve(join(cwd, "workspace", "benchmark-real"));
 
   const taskDescription = `Write three independent Python scripts:
 1. sort.py - A script with a function that sorts a list of numbers using bubble sort.
@@ -75,9 +77,10 @@ Make sure to create all three files independently.`;
       autoPlan: false,
       maxReviewCycles: 3,
     });
-    console.log(`  Submitted Task V1: ${taskV1.id}`);
+    const taskV1View = taskV1 as import("../src/dashboard/service.js").TaskView;
+    console.log(`  Submitted Task V1: ${taskV1View.id}`);
     
-    const statusV1 = await pollTaskDone(service, taskV1.id);
+    const statusV1 = await pollTaskDone(service, taskV1View.id);
     const timeV1 = performance.now() - startV1;
     console.log(`  V1 Completed with status: ${statusV1} in ${(timeV1 / 1000).toFixed(2)}s`);
 

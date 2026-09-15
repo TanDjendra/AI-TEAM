@@ -18,7 +18,8 @@ import { ReviewCenter } from "./components/review-center.js";
 import { SystemHeader } from "./components/system-header.js";
 import { TaskBoard } from "./components/task-board.js";
 import { WorkflowBoard } from "./components/workflow-board.js";
-import { ErrorState, Panel, PanelBody, PanelHeader, PanelTitle, SkeletonRows } from "./components/ui.js";
+import { IntegrationBoard } from "./components/integration-board.js";
+import { ErrorState, Panel, PanelBody, PanelHeader, PanelTitle, SkeletonRows, Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui.js";
 import { useApi } from "./lib/use-api.js";
 import { useEventStream } from "./lib/use-event-stream.js";
 import type {
@@ -28,12 +29,14 @@ import type {
   SystemStatusView,
   TaskView,
   WorkflowView,
+  IntegrationCandidateView,
 } from "../src/dashboard/service.js";
 
 export default function CommandCenterPage() {
   const status = useApi<SystemStatusView>("/api/status");
   const tasks = useApi<TaskView[]>("/api/tasks");
   const workflows = useApi<WorkflowView[]>("/api/workflows");
+  const integrations = useApi<IntegrationCandidateView[]>("/api/integrations");
   const reviews = useApi<ReviewView[]>("/api/reviews?limit=50");
   const activity = useApi<ActivityView[]>("/api/activity?limit=100");
 
@@ -54,9 +57,10 @@ export default function CommandCenterPage() {
     status.refresh();
     tasks.refresh();
     workflows.refresh();
+    integrations.refresh();
     reviews.refresh();
     activity.refresh();
-  }, [status, tasks, workflows, reviews, activity]);
+  }, [status, tasks, workflows, integrations, reviews, activity]);
 
   const firstEvent = React.useRef(true);
   React.useEffect(() => {
@@ -72,6 +76,7 @@ export default function CommandCenterPage() {
   const agents: AgentView[] = status.data?.agents ?? [];
   const taskList = tasks.data ?? [];
   const workflowList = workflows.data ?? [];
+  const integrationList = integrations.data ?? [];
   const databaseReady = status.data?.database.ready ?? false;
   const databaseConfigured = status.data?.database.configured ?? false;
 
@@ -111,8 +116,8 @@ export default function CommandCenterPage() {
           <RecoveryBanner onRecovered={refreshAll} />
         </div>
 
-        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="min-w-0 space-y-3">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="min-w-0 space-y-4">
             {/* ---- agent cards ---- */}
             <section aria-label="Agents">
               {initialLoading ? (
@@ -140,75 +145,85 @@ export default function CommandCenterPage() {
               )}
             </section>
 
-            {/* ---- task board ---- */}
-            <Panel>
-              <PanelHeader>
-                <PanelTitle>Task board</PanelTitle>
-                <span className="text-[10px] text-[var(--content-faint)]">
-                  {taskList.length} task(s)
-                  {tasks.loading ? " · refreshing" : ""}
-                </span>
-              </PanelHeader>
-              <PanelBody className="p-0">
-                {tasks.loading && tasks.data === undefined ? (
-                  <div className="p-4">
-                    <SkeletonRows rows={3} />
-                  </div>
-                ) : tasks.error ? (
-                  <div className="p-4">
-                    <ErrorState message="Could not load tasks." detail={tasks.error} />
-                  </div>
-                ) : (
-                  <div className="p-3">
-                    <TaskBoard tasks={taskList} now={now} />
-                  </div>
-                )}
-              </PanelBody>
-            </Panel>
+            <Tabs defaultValue="tasks" className="w-full">
+              <TabsList className="mb-4">
+                <TabsTrigger value="tasks">Tasks & Jobs</TabsTrigger>
+                <TabsTrigger value="workflows">Workflows</TabsTrigger>
+                <TabsTrigger value="integrations">Integrations ({integrationList.length})</TabsTrigger>
+                <TabsTrigger value="reviews">Code Reviews</TabsTrigger>
+              </TabsList>
 
-            {/* ---- workflow board ---- */}
-            <Panel>
-              <PanelHeader>
-                <PanelTitle>Workflow board</PanelTitle>
-                <span className="text-[10px] text-[var(--content-faint)]">
-                  {workflowList.length} workflow(s)
-                  {workflows.loading ? " · refreshing" : ""}
-                </span>
-              </PanelHeader>
-              <PanelBody className="p-0">
-                {workflows.loading && workflows.data === undefined ? (
-                  <div className="p-4">
-                    <SkeletonRows rows={3} />
-                  </div>
-                ) : workflows.error ? (
-                  <div className="p-4">
-                    <ErrorState message="Could not load workflows." detail={workflows.error} />
-                  </div>
-                ) : (
-                  <div className="p-3">
-                    <WorkflowBoard workflows={workflowList} now={now} />
-                  </div>
-                )}
-              </PanelBody>
-            </Panel>
+              <TabsContent value="tasks" className="mt-0">
+                <Panel>
+                  <PanelHeader>
+                    <PanelTitle>Task board</PanelTitle>
+                    <span className="text-[10px] text-[var(--content-faint)]">
+                      {taskList.length} task(s)
+                      {tasks.loading ? " · refreshing" : ""}
+                    </span>
+                  </PanelHeader>
+                  <PanelBody className="p-0">
+                    {tasks.loading && tasks.data === undefined ? (
+                      <div className="p-4"><SkeletonRows rows={3} /></div>
+                    ) : tasks.error ? (
+                      <div className="p-4"><ErrorState message="Could not load tasks." detail={tasks.error} /></div>
+                    ) : (
+                      <div className="p-3"><TaskBoard tasks={taskList} now={now} /></div>
+                    )}
+                  </PanelBody>
+                </Panel>
+              </TabsContent>
 
-            {/* ---- review center ---- */}
-            <ReviewCenter
-              reviews={reviews.data ?? []}
-              loading={reviews.loading}
-              {...(reviews.error ? { error: reviews.error } : {})}
-            />
+              <TabsContent value="workflows" className="mt-0">
+                <Panel>
+                  <PanelHeader>
+                    <PanelTitle>Workflow board</PanelTitle>
+                    <span className="text-[10px] text-[var(--content-faint)]">
+                      {workflowList.length} workflow(s)
+                      {workflows.loading ? " · refreshing" : ""}
+                    </span>
+                  </PanelHeader>
+                  <PanelBody className="p-0">
+                    {workflows.loading && workflows.data === undefined ? (
+                      <div className="p-4"><SkeletonRows rows={3} /></div>
+                    ) : workflows.error ? (
+                      <div className="p-4"><ErrorState message="Could not load workflows." detail={workflows.error} /></div>
+                    ) : (
+                      <div className="p-3"><WorkflowBoard workflows={workflowList} now={now} /></div>
+                    )}
+                  </PanelBody>
+                </Panel>
+              </TabsContent>
+
+              <TabsContent value="integrations" className="mt-0">
+                {integrations.loading && integrations.data === undefined ? (
+                  <div className="p-4"><SkeletonRows rows={3} /></div>
+                ) : integrations.error ? (
+                  <div className="p-4"><ErrorState message="Could not load integrations." detail={integrations.error} /></div>
+                ) : (
+                  <IntegrationBoard candidates={integrationList} now={now} onRefresh={refreshAll} />
+                )}
+              </TabsContent>
+
+              <TabsContent value="reviews" className="mt-0">
+                <ReviewCenter
+                  reviews={reviews.data ?? []}
+                  loading={reviews.loading}
+                  {...(reviews.error ? { error: reviews.error } : {})}
+                />
+              </TabsContent>
+            </Tabs>
           </div>
 
           {/* ---- right column ---- */}
-          <div className="flex min-w-0 flex-col gap-3 xl:h-[calc(100dvh-8rem)]">
+          <div className="flex min-w-0 flex-col gap-4 xl:h-[calc(100dvh-8rem)]">
             <CreateTaskForm onCreated={refreshAll} />
 
             <LiveActivity
               realtime={stream.entries}
               historical={activity.data ?? []}
               connected={stream.state === "CONNECTED"}
-              className="min-h-[320px] flex-1"
+              className="min-h-[320px] flex-1 panel backdrop-blur-md"
             />
           </div>
         </div>
