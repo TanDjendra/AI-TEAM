@@ -145,3 +145,111 @@ export function toRouterError(value: unknown, context: { url?: string } = {}): R
 
   return new RouterError(friendly, { kind, cause: value, detail: scrubSecrets(truncate(raw)) });
 }
+
+// ---------------------------------------------------------------------------
+// Setup / connection diagnostics (Phase 1)
+// ---------------------------------------------------------------------------
+//
+// The setup wizard and the product CLI must tell an operator *what is wrong*
+// without showing a stack trace. These labels are a small, stable vocabulary
+// layered ON TOP of the existing `ErrorKind` taxonomy — they do not replace it.
+// A single mapper keeps every caller consistent, so a raw fetch/socket error is
+// never surfaced verbatim.
+
+export type SetupFailureLabel =
+  | "INVALID_URL"
+  | "ROUTER_UNREACHABLE"
+  | "INVALID_API_KEY"
+  | "TIMEOUT"
+  | "SERVER_ERROR"
+  | "MODEL_NOT_FOUND"
+  | "UNKNOWN";
+
+/** True when a string is a syntactically valid http(s) URL. */
+export function isValidHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Maps an existing `ErrorKind` onto a user-facing setup label.
+ *
+ * Kept separate from `classifyHttpStatus` so the transport taxonomy stays
+ * untouched; this is presentation, not classification.
+ */
+export function setupLabelForKind(kind: ErrorKind): SetupFailureLabel {
+  switch (kind) {
+    case "authentication":
+      return "INVALID_API_KEY";
+    case "network":
+      return "ROUTER_UNREACHABLE";
+    case "timeout":
+      return "TIMEOUT";
+    case "server-error":
+    case "rate-limit":
+      return "SERVER_ERROR";
+    case "not-found":
+      return "MODEL_NOT_FOUND";
+    case "validation":
+      // A 4xx that is not auth/404 is almost always a malformed request, which
+      // in a connection test means the URL or the request shape is wrong.
+      return "INVALID_URL";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+/**
+ * Short, operator-readable explanation for a label. No stack traces, no URLs
+ * containing credentials, no raw driver text.
+ */
+export function describeSetupLabel(label: SetupFailureLabel): string {
+  switch (label) {
+    case "INVALID_URL":
+      return "The router URL is not a valid http(s) address. It should include the /v1 suffix.";
+    case "ROUTER_UNREACHABLE":
+      return "The router could not be reached. Check that 9Router is running and the URL is correct.";
+    case "INVALID_API_KEY":
+      return "The router rejected the API key. Check ROUTER_API_KEY.";
+    case "TIMEOUT":
+      return "The router did not respond in time. It may be slow or unreachable.";
+    case "SERVER_ERROR":
+      return "The router returned a server error. Try again shortly.";
+    case "MODEL_NOT_FOUND":
+      return "The router does not serve the requested model.";
+    default:
+      return "The connection test failed for an unknown reason.";
+  }
+}
+
+/**
+ * Classifies any thrown value for the setup flow.
+ *
+ * Precedence: an explicit, already-classified `RouterError` wins; otherwise the
+ * thrown value is classified; finally a syntactically invalid `baseUrl` is
+ * reported as `INVALID_URL` rather than a generic network failure, because the
+ * two need very different operator responses.
+ */
+export function classifySetupFailure(
+  value: unknown,
+  context: { baseUrl?: string } = {},
+): { label: SetupFailureLabel; message: string } {
+  if (context.baseUrl && !isValidHttpUrl(context.baseUrl)) {
+    return {
+      label: "INVALID_URL",
+      message: describeSetupLabel("INVALID_URL"),
+    };
+  }
+
+  if (value instanceof RouterError) {
+    const label = setupLabelForKind(value.kind);
+    return { label, message: describeSetupLabel(label) };
+  }
+
+  const label = setupLabelForKind(classifyThrown(value));
+  return { label, message: describeSetupLabel(label) };
+}

@@ -8,7 +8,7 @@
  *  - Secrets are redacted by `describe()` so they can be logged safely.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { isLogLevel, type LogFormat, type LogLevel } from "../domain/logger.js";
@@ -500,4 +500,195 @@ export function describeConfig(config: AppConfig): Record<string, string | numbe
     "database.maxConnections": config.database.maxConnections,
     "database.requirePersistence": config.database.requirePersistence,
   };
+}
+
+// ---------------------------------------------------------------------------
+// First-run detection & configuration readiness (Phase 1)
+// ---------------------------------------------------------------------------
+//
+// The product CLI and the setup wizard need one honest answer to "is this
+// installation ready to run?" — and it must NOT be "does a file exist". A file
+// can exist and still be invalid, incomplete, or point at a router with no key.
+//
+// `assessConfiguration` runs the SAME `loadConfig` the runtime uses, so what it
+// reports is exactly what the orchestrator would do at startup. Nothing is
+// inferred from filenames.
+
+/** A configuration problem, already classified for a setup UI. */
+export interface ConfigProblem {
+  /** Machine-readable code, stable for the wizard to branch on. */
+  code:
+    | "CONFIG_FILE_INVALID"
+    | "MISSING_API_KEY"
+    | "MISSING_CODER_MODEL"
+    | "MISSING_REVIEWER_MODEL"
+    | "IDENTICAL_MODELS"
+    | "INVALID_ROUTER_URL"
+    | "INVALID_ENV";
+  message: string;
+}
+
+export interface ConfigurationAssessment {
+  /** True when the installation can run without further setup. */
+  valid: boolean;
+  /**
+   * True when this looks like a first run: no usable configuration was found,
+   * i.e. the failing reasons are all "missing", none "misconfigured". A broken
+   * file is NOT a first run — it is an incomplete/broken setup the operator must
+   * fix, and the two need different wizard copy.
+   */
+  firstRun: boolean;
+  /** The resolved config path, whether or not a file exists there. */
+  configPath: string;
+  /** Whether the JSON config file exists on disk. */
+  configFileExists: boolean;
+  /** Whether `.env` exists on disk. */
+  envFileExists: boolean;
+  /** Whether ROUTER_API_KEY is present and non-empty (never the value). */
+  hasApiKey: boolean;
+  /** Every problem found, empty when `valid` is true. */
+  problems: ConfigProblem[];
+}
+
+export interface AssessConfigurationOptions extends LoadConfigOptions {}
+
+/**
+ * Classifies the raw messages `loadConfig` produces into stable codes.
+ *
+ * Deliberately a small substring map over the known diagnostics, so the wizard
+ * gets a stable vocabulary while `loadConfig` remains the single validator.
+ */
+function classifyConfigError(errors: readonly string[]): ConfigProblem[] {
+  const problems: ConfigProblem[] = [];
+  for (const message of errors) {
+    let code: ConfigProblem["code"] = "INVALID_ENV";
+    if (message.includes("ROUTER_API_KEY is required")) code = "MISSING_API_KEY";
+    else if (message.includes("ROUTER_BASE_URL")) code = "INVALID_ROUTER_URL";
+    else if (message.includes("CODER_MODEL is required")) code = "MISSING_CODER_MODEL";
+    else if (message.includes("REVIEWER_MODEL is required")) code = "MISSING_REVIEWER_MODEL";
+    else if (message.includes("must differ")) code = "IDENTICAL_MODELS";
+    problems.push({ code, message });
+  }
+  return problems;
+}
+
+/**
+ * Assesses whether the installation is configured and runnable.
+ *
+ * Uses `readFileSync` presence checks only for the file-existence flags; the
+ * pass/fail verdict comes from actually attempting `loadConfig`.
+ *
+ * A `ConfigFileError` (a present-but-broken JSON file) is reported as
+ * `CONFIG_FILE_INVALID` and makes `firstRun` false: the operator has configured
+ * something, it is simply wrong. A missing key/models makes `firstRun` true.
+ */
+export function assessConfiguration(
+  options: AssessConfigurationOptions = {},
+): ConfigurationAssessment {
+  const cwd = options.cwd ?? process.cwd();
+  const configPath = options.configPath ?? resolveConfigPath(options.env ?? process.env, cwd);
+
+  const configFileExists = existsSync(configPath);
+  const envFileExists = existsSync(join(cwd, ".env"));
+
+  // Read file presence for the honest flags above, but never trust presence as
+  // readiness. The real verdict is the same loadConfig the runtime performs.
+  let hasApiKey = false;
+  try {
+    const merged: Record<string, string | undefined> = { ...(options.env ?? process.env) };
+    if (options.loadDotEnv !== false) {
+      try {
+        const fileEnv = parseDotEnv(readFileSync(join(cwd, ".env"), "utf8"));
+        for (const [key, value] of Object.entries(fileEnv)) {
+          if (merged[key] === undefined || merged[key] === "") merged[key] = value;
+        }
+      } catch {
+        // No .env is a normal state.
+      }
+    }
+    hasApiKey = Boolean(merged.ROUTER_API_KEY?.trim());
+  } catch {
+    hasApiKey = false;
+  }
+
+  try {
+    loadConfig(options);
+    return {
+      valid: true,
+      firstRun: false,
+      configPath,
+      configFileExists,
+      envFileExists,
+      hasApiKey,
+      problems: [],
+    };
+  } catch (error) {
+    if (error instanceof ConfigFileError) {
+      return {
+        valid: false,
+        firstRun: false,
+        configPath,
+        configFileExists,
+        envFileExists,
+        hasApiKey,
+        problems: [
+          {
+            code: "CONFIG_FILE_INVALID",
+            message: error.message,
+          },
+        ],
+      };
+    }
+    if (error instanceof ConfigError) {
+      const problems = classifyConfigError(error.fields);
+      // A first run = nothing usable configured yet. If every failing reason is
+      // a *missing* secret/model, there is nothing to repair, only to set up.
+      const missingCodes: ReadonlySet<ConfigProblem["code"]> = new Set([
+        "MISSING_API_KEY",
+        "MISSING_CODER_MODEL",
+        "MISSING_REVIEWER_MODEL",
+      ]);
+      const firstRun = problems.length > 0 && problems.every((p) => missingCodes.has(p.code));
+      return {
+        valid: false,
+        firstRun,
+        configPath,
+        configFileExists,
+        envFileExists,
+        hasApiKey,
+        problems,
+      };
+    }
+
+    return {
+      valid: false,
+      firstRun: false,
+      configPath,
+      configFileExists,
+      envFileExists,
+      hasApiKey,
+      problems: [
+        {
+          code: "INVALID_ENV",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      ],
+    };
+  }
+}
+
+/** Convenience predicate: is this installation ready to run? */
+export function hasValidConfiguration(options: AssessConfigurationOptions = {}): boolean {
+  return assessConfiguration(options).valid;
+}
+
+/**
+ * True only for a genuine first run.
+ *
+ * Note the deliberate asymmetry: a *broken* config file returns `false` here
+ * (it is a repair, not a first run). Callers that need "needs the wizard" should
+ * consult `assessConfiguration().valid` instead of this alone.
+ */
+export function isFirstRun(options: AssessConfigurationOptions = {}): boolean {
+  return assessConfiguration(options).firstRun;
 }
